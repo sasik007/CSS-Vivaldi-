@@ -1,0 +1,371 @@
+/* ============================
+   GLOBALNE KOLORY / ZMIENNE
+   ============================ */
+:root {
+    --gx-bg: black ; 
+    --gx-bg2: rgba(27, 35, 41, 0.7);
+    --gx-hover: rgba(0, 255, 0, 0.3);
+    --gx-focus-border: green;
+    --gx-text: white;
+    --gx-tab-selected: yellow;
+    --gx-button-bg: black;
+}
+
+
+/* ============================
+   KARTY
+   ============================ */
+.tab {
+    background: var(--gx-bg2) !important;
+    color: white !important;
+    border-bottom: 2px solid green !important;
+}
+
+.tab.active {
+    background: var(--gx-bg) !important;
+    color: var(--gx-tab-selected) !important;
+    border: 2px solid blue !important;
+}
+
+.tab:not(.active):hover {
+    background: rgba(0, 120, 255, 0.6) !important;
+    color: white !important;
+    border-bottom: 2px solid blue !important;
+    transition: background 0.15s ease;
+}
+
+.tab.active:hover {
+    background: rgba(0, 120, 255, 0.6) !important;
+    color: var(--gx-tab-selected) !important;
+    transition: background 0.15s ease;
+}
+
+
+/* ============================
+   TŁA PASKÓW / INTERFACE
+   ============================ */
+#header,
+.toolbar,
+.toolbar-inner,
+.mainbar,
+.bookmark-bar {
+    background: rgba(27, 35, 41, 0.15) !important;
+    
+    -webkit-backdrop-filter: blur(8px) !important;
+    border-radius: 12px !important;
+     
+}
+  
+
+
+#header { background-color: transparent !important; }
+.bookmark-bar { background-color: transparent !important; height: 32px !important; }
+.toolbar,
+.toolbar-inner,
+.mainbar { background-color: transparent !important; }
+
+
+
+/* ============================
+   STARTPAGE SEARCHFIELD
+   ============================ */
+.startpage .SearchField {
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid limegreen !important;
+    border-radius: 0 !important;
+    height: 30px !important;
+    padding: 8px 0 0 0 !important;
+    color: white !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+
+/* ============================
+   BOOKMARK BAR
+   ============================ */
+
+/* przyciski zakładek – ZAOKRĄGLENIA + SZKŁO */
+.bookmark-bar button,
+.bookmark-bar .bookmark {
+    border-radius: 14px !important;
+    padding: 6px 14px !important;
+    margin: 2px 2px !important;
+
+    background: linear-gradient(
+        135deg,
+        rgba(255, 255, 255, 0.05),
+        rgba(255, 255, 255, 0.10)
+    ) !important;
+
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background 0.25s ease;
+    border-bottom: 2px solid yellow !important;
+
+  }
+
+/* hover / kliknięcie */
+.bookmark-bar button:hover,
+.bookmark-bar .bookmark:hover {
+    background: rgba(0, 120, 255, 0.6) !important;
+    transition: background 0.15s ease;
+}
+
+.bookmark-bar button:active,
+.bookmark-bar .bookmark:active {
+    background: linear-gradient(
+      135deg,
+      rgba(120, 180, 255, 0.35),
+      rgba(180, 120, 255, 0.35)
+    ) !important;
+}
+
+/* foldery */
+.bookmark-bar .folder {
+    border-radius: 14px !important;
+    overflow: hidden;
+}
+
+.bookmark-bar .folder .menu {
+    background: rgba(20,20,20,0.6) !important;
+    backdrop-filter: blur(6px);
+    border-radius: 12px !important;
+}
+
+.bookmark-bar .folder .menuitem {
+    border-radius: 10px !important;
+    padding: 6px 10px !important;
+}
+
+.bookmark-bar .folder .menuitem:hover {
+    background: rgba(255,255,255,0.15) !important;
+}
+
+/* ikony */
+.bookmark-bar button img,
+.bookmark-bar button svg {
+    width: 20px !important;
+    height: 20px !important;
+    margin-right: 6px !important;
+    vertical-align: middle;
+    position: relative;
+    top: -4px;
+}
+
+
+
+
+
+
+
+
+
+
+
+/* ============================
+   PRZYCISKI OKNA (X, -, □)
+   ============================ */
+/* poprawiony komentarz */
+ /* PRZYCISKI ZAMKNIJ / MINIMALIZUJ / MAKSYMALIZUJ */
+
+.window-buttongroup {
+    top: 0 !important;
+    right: 0 !important;
+}
+
+.window-buttongroup button {
+    padding: 0 !important;
+    margin: 0 !important;
+    height: 40px !important;
+    width: 40px !important;
+}
+
+button.window-minimize:hover,
+button.window-maximize:hover {
+    background-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+button.window-close:hover {
+    background-color: rgba(240, 16, 32, 0.8) !important;
+}
+
+
+/* ============================
+   OGÓLNE HOVERY DLA BUTTON/A
+   ============================ */
+button:hover,
+a:hover {
+    background: rgba(0, 120, 255, 0.6) !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transition: background 0.15s ease;
+}
+
+
+/* ============================
+   DOLNY PASEK
+   ============================ */
+#panels-container,
+footer {
+  background: transparent !important;
+}
+
+
+
+/* ==========================================================
+   PASEK ADRESU — TĘCZOWA OBRAMÓWKA Z MASKĄ, TŁO BEZ ZMIANY
+   ========================================================== */
+
+addressfield,
+.addressfield,
+.UrlBar-AddressField,
+.UrlField.input {
+    position: relative;
+    background-color: #1a1a1a !important; /* oryginalne tło */
+    color: var(--gx-text) !important;
+    border-radius: 14px !important;
+    padding-left: 8px !important;
+    box-shadow: none !important;
+    outline: none !important;
+    z-index: 0;
+}
+
+/* Gradientowa obramówka pseudo-elementem ::before */
+addressfield::before,
+.addressfield::before,
+.UrlBar-AddressField::before,
+.UrlField.input::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 1px; /* grubość obramówki */
+    border-radius: inherit; /* zachowuje zaokrąglenie */
+    background: linear-gradient(90deg, red, orange, yellow, green, blue, indigo, violet);
+
+    /* maska odsłania wnętrze elementu */
+    -webkit-mask: 
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+
+    pointer-events: none; /* nie przeszkadza w klikaniu */
+    z-index: 1;
+}
+
+/* Wewnętrzny input nad pseudo-elementem */
+addressfield input,
+.addressfield input,
+.UrlBar-AddressField input {
+    position: relative;
+    z-index: 2;
+    background: transparent !important;
+    color: white !important;
+    border: none !important;
+    outline: none !important;
+}
+
+/* Shadow DOM ::part (jeśli potrzebne) */
+addressfield::part(input),
+addressfield::part(textfield),
+addressfield::part(host) {
+    background-color: #1a1a1a !important; /* zachowujemy oryginalne tło */
+    color: white !important;
+    border-radius: 14px !important;
+}
+
+
+
+
+
+/* 🔽 Górne paski niżej w stosie */
+#header,
+.toolbar,
+.toolbar-inner,
+.mainbar,
+.bookmark-bar
+.bookmark-bar button,
+.bookmark-bar .bookmark {
+    position: relative !important;
+    z-index: 1 !important;
+    overflow: visible !important; /* konieczne, aby popup nie był obcinany */
+}
+
+/* 🔼 Pasek adresu + lista podpowiedzi na wierzchu */
+#addressfield,
+.UrlBar-AddressField,
+.addressfield,
+#addressfield-popup,
+.vivaldi-addressfield-popup,
+.vivaldi-popup,
+.popup,
+.suggestions {
+    position: relative !important;
+    z-index: 999999 !important;
+}
+
+
+
+.OmniDropdown {
+    
+    background: #1b2329;
+    border-radius: 18px;
+    z-index: 1;
+    padding: 12px; /* wewnętrzne odstępy */
+    overflow: hidden;
+}
+
+.OmniDropdown::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    padding: 1px; /* grubość obramówki */
+    border-radius: inherit;
+    background: linear-gradient(90deg, red, orange, yellow, green, blue, indigo, violet);
+    background:---red;
+    -webkit-mask:
+        linear-gradient(#fff 0 0) content-box,
+        linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+}
+
+
+
+/* ====== Dodatkowy test: obrys dla wszystkich elementów listy (tylko do debugu) ====== */
+.OmniDropdown li,
+#addressfield-popup li,
+#omnibox-popup li,
+.popup li,
+.suggestions li {
+  outline: 1px dashed rgba(255,255,255,0.06) !important;
+}
+
+
+/* Minimalna reguła: fioletowe zaznaczenie w popupie paska adresu */
+#addressfield-popup [aria-selected="true"],
+#addressfield-popup [role="option"][aria-selected="true"],
+#omnibox-popup [aria-selected="true"],
+#omnibox-popup [role="option"][aria-selected="true"],
+.OmniDropdown [aria-selected="true"],
+.OmniDropdown .selected {
+  background: 	blue !important; /* fioletowy */
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  border-radius: 12px !important; /* tutaj zaokrąglenie */
+}
+
+
+
+::selection {
+  background: #696969 !important; /* DarkGray */
+  color: #fff !important;
+}
+
+
+
+
+
