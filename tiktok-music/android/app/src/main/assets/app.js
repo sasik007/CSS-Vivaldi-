@@ -36,12 +36,19 @@ async function searchSongs(term) {
   }));
 }
 
+function ytSearch(q) {
+  return "https://www.youtube.com/results?search_query=" + encodeURIComponent(q.trim());
+}
+function ytButton(q, label = "▶ Szukaj całej piosenki w YouTube") {
+  return `<button class="btn yt" data-open="${esc(ytSearch(q))}">${label}</button>`;
+}
+
 function storeLinks(s) {
   const q = `${s.artist} ${s.title}`.trim(), e = encodeURIComponent(q);
   return [
+    ["▶ YouTube", ytSearch(q)],
     ["Spotify", `https://open.spotify.com/search/${e}`],
     ["YT Music", `https://music.youtube.com/search?q=${e}`],
-    ["YouTube", `https://www.youtube.com/results?search_query=${e}`],
     ["Apple Music", s.apple],
     ["Deezer", `https://www.deezer.com/search/${e}`],
   ].filter(([, u]) => u);
@@ -50,7 +57,8 @@ function storeLinks(s) {
 function renderResults(list) {
   resultsEl.innerHTML = "";
   list.forEach((s, i) => {
-    const links = storeLinks(s).map(([n, u]) => `<button class="btn ghost small" data-open="${esc(u)}">${n}</button>`).join("");
+    const links = storeLinks(s).map(([n, u], j) =>
+      `<button class="btn ${j === 0 ? "yt" : "ghost"} small" data-open="${esc(u)}">${n}</button>`).join("");
     resultsEl.insertAdjacentHTML("beforeend", `
       <article class="song ${i === 0 ? "best" : ""}">
         <div class="top">
@@ -90,13 +98,16 @@ async function analyze(url) {
     current = d;
     const m = d.music || {}, orig = isOriginal(m);
     const canDl = !!(m.playUrl || d.videoUrl);
+    // dla „oryginalnego dźwięku” szukamy po opisie filmu (często jest tam tytuł piosenki)
+    const ytQuery = orig ? (d.desc || "").replace(/#\S+/g, "").trim() + " song" : `${m.author || ""} ${m.title}`;
     $("#video-box").innerHTML = `
       <div class="video">
         ${m.cover || d.cover ? `<img src="${esc(m.cover || d.cover)}" alt="">` : ""}
         <div class="info">
           <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
-          ${canDl ? `<p><button class="btn" id="btn-dl">⬇️ Pobierz dźwięk</button></p>` : ""}
+          <p>${ytButton(ytQuery, orig ? "▶ Szukaj w YouTube" : undefined)}</p>
+          ${canDl ? `<p><button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek z TikToka</button></p>` : ""}
         </div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = downloadCurrent;
@@ -129,7 +140,7 @@ async function downloadCurrent() {
     const msg = await call("download", m.playUrl || "", d.videoUrl || "", name);
     btn.textContent = "✅ " + msg;
   } catch (err) {
-    btn.disabled = false; btn.textContent = "⬇️ Spróbuj ponownie";
+    btn.disabled = false; btn.textContent = "⬇️ Spróbuj pobrać ponownie";
     setStatus("❌ " + err.message, true);
   }
 }
@@ -161,6 +172,12 @@ $("#form-search").onsubmit = async (e) => {
     setStatus(r.length ? `Znaleziono ${r.length} utworów` : "Nic nie znaleziono 😕", !r.length);
     renderResults(r);
   } catch (err) { setStatus("❌ " + err.message, true); }
+};
+
+$("#btn-yt").onclick = () => {
+  const q = $("#q").value.trim();
+  if (!q) return $("#q").focus();
+  Android.openUrl(ytSearch(q));
 };
 
 $("#btn-rec").onclick = () => Android.recognize();

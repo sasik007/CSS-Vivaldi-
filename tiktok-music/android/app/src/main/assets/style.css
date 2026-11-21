@@ -58,3 +58,6 @@ code { background: #222; padding: 1px 5px; border-radius: 4px; }
   .panel { padding: 14px; }
 }
 main { padding-top: max(14px, env(safe-area-inset-top)); }
+.btn.yt { background: #ff0000; color: #fff; }
+.btn.yt.small { font-weight: 600; }
+.video .info .btn { width: 100%; text-align: center; }
