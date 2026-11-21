@@ -188,7 +188,19 @@ function isSameSong(f, t) {
   return !!fa && (fa.includes(ta) || ta.includes(fa) || ta.split(" ").some(w => w.length > 2 && fa.split(" ").includes(w)));
 }
 
-let lastTarget = null;
+let lastTarget = null, lastYt = null;
+/** Pierwszy film z YouTube, którego tytuł zawiera tytuł piosenki (i ew. wykonawcę). */
+async function findYtMatch(t, q) {
+  lastYt = null;
+  if (!t || !t.title || !q) return null;
+  try {
+    const list = JSON.parse(await call("youtubeSearch", q));
+    const tt = norm(t.title), ta = norm((t.artist || "").replace(/\b(feat|ft)\.?.*$/i, ""));
+    lastYt = list.find(v => { const n = norm(v.title); return n.includes(tt) && (!ta || n.includes(ta)); })
+      || list.find(v => norm(v.title).includes(tt)) || null;
+  } catch {}
+  return lastYt;
+}
 /** Wynik z katalogu tylko jeśli to naprawdę ta piosenka (tytuł/wykonawca się zgadzają). */
 function verifiedBest(t) {
   if (!t || !t.title) return null;
@@ -198,6 +210,7 @@ function verifiedBest(t) {
 /** Czas + przycisk „Pobierz cały” na karcie (Teraz na TikToku / film z linku). */
 async function updateFullUI(target, ytQuery) {
   lastTarget = target;
+  lastYt = null;
   const best = verifiedBest(target);
   const t = best ? { title: best.title, artist: best.artist } : target;
   const match = t && t.title ? lastFree.find(f => f.url && isSameSong(f, t)) : null;
@@ -223,10 +236,16 @@ async function updateFullUI(target, ytQuery) {
   if (!el) return;
   const song = best || match;
   if (song && song.duration) {
+    findYtMatch(t, ytQuery);  // w tle: dokładny film dla „Pobierz w YouTube”
     el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">(${esc(song.artist || "")} — ${esc(song.title)})</small>`;
     return;
   }
-  el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><small class="muted">nieznana — nie znaleziono tego utworu w katalogu</small>`;
+  // brak w katalogu → YouTube, ale tylko film, którego tytuł zawiera tytuł piosenki
+  el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam na YouTube…</small>`;
+  const yt = await findYtMatch(t, ytQuery);
+  el.innerHTML = yt && yt.length
+    ? `<span class="badge">⏱ Cała piosenka</span><b>${esc(yt.length)}</b> <small class="muted">(YouTube: ${esc(yt.title)})</small>`
+    : `<span class="badge">⏱ Cała piosenka</span><small class="muted">nieznana — nie znaleziono tego utworu</small>`;
 }
 
 /** Otwiera film z piosenką w aplikacji YouTube (pod filmem: ⬇️ Pobierz — z Premium). */
@@ -234,7 +253,8 @@ async function openInYtMusic(btn) {
   const q = btn.dataset.ytm, label = btn.textContent;
   btn.disabled = true; btn.textContent = "⏳ Otwieram YouTube…";
   let url = ytSearch(q);
-  try {
+  if (lastYt) url = "https://www.youtube.com/watch?v=" + lastYt.id;
+  else try {
     const v = JSON.parse(await call("youtubeSearch", q))[0];
     if (v) url = "https://www.youtube.com/watch?v=" + v.id;
   } catch {}
