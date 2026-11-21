@@ -868,6 +868,7 @@ $("#btn-diag").onclick = () => {
     `Wykryty dźwięk: ${d.title ? `„${d.title}” (${ago(d.titleAgo)})` : "brak"}`,
     `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
     `Pasek postępu filmu: ${sc.range || "-"}`,
+    `Komentarze (ostatnia próba): ${d.comments ? "\n  " + d.comments.trim().split("\n").join("\n  ") : "-"}`,
     `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
     ``,
     `Kandydaci na nazwę dźwięku (✓ = użyty, bo jest na ekranie):`,
@@ -1026,9 +1027,9 @@ function maybeComments(key) {
 window.handleComments = async (texts, opened) => {
   if (!commentsFor || commentsFor !== cardKey) return;
   commentsFor = "";
-  if (!opened) return showCommentsFact("nie udało się otworzyć komentarzy");
+  if (!opened) return showCommentsFact("nie znaleziono przycisku komentarzy — otwórz je w TikToku ręcznie i kliknij");
   const cands = mineComments(texts).slice(0, 4);
-  if (!cands.length) return showCommentsFact("nikt nie podał tytułu");
+  if (!cands.length) return showCommentsFact(`brak tytułu w ${texts.length} przeczytanych napisach — przewiń komentarze i spróbuj ponownie`);
   showCommentsFact("busy");
   // sprawdź propozycje w katalogu — wybierz pierwszą potwierdzoną
   let pick = null, song = null;

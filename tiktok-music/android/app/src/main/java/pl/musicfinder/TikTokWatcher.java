@@ -60,8 +60,13 @@ public class TikTokWatcher extends AccessibilityService {
     static final String KEY_COMMENTS = "cm_texts";
     private static final Pattern COMMENT_RE = Pattern.compile(
             "(komentarz|comment|comentario|coment[aá]rio|kommentar|commentaire|commento)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    // tylko pole „Dodaj komentarz…” na dole — przycisk to np. „Przeczytaj lub dodaj komentarze”
     private static final Pattern ADD_COMMENT_RE = Pattern.compile(
-            "(dodaj|add|añadir|adicionar|hinzuf|ajouter|aggiungi|napisz|write)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+            "^(dodaj komentarz|napisz komentarz|add comment|add a comment|añadir comentario|adicionar coment|kommentar hinzuf|ajouter un commentaire|aggiungi un commento)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    static final String KEY_CM_DBG = "cm_dbg";
+    private long cmClickUntil = 0;
+    private final StringBuilder cmDbg = new StringBuilder();
     private int cmStep = 0;
     private long cmDeadline = 0;
     private boolean cmOpened = false;
@@ -77,6 +82,8 @@ public class TikTokWatcher extends AccessibilityService {
             w.cmOpened = false;
             w.cmTexts.clear();
             w.cmDeadline = System.currentTimeMillis() + 9000;
+            w.cmClickUntil = System.currentTimeMillis() + 3000 + (tiktokVisible ? 0 : 800);
+            w.cmDbg.setLength(0);
             w.h.postDelayed(w.cmTick, tiktokVisible ? 50 : 800);
         });
         return true;
@@ -89,6 +96,11 @@ public class TikTokWatcher extends AccessibilityService {
             if (System.currentTimeMillis() > cmDeadline) { finishComments(); return; }
             if (cmStep == 1) {
                 if (clickComments()) { cmOpened = true; cmStep = 2; h.postDelayed(this, 1500); }
+                else if (System.currentTimeMillis() > cmClickUntil) {
+                    // nie da się kliknąć — może komentarze są już otwarte ręcznie: czytaj ekran
+                    collectTexts();
+                    finishComments();
+                }
                 else h.postDelayed(this, 250);
             } else if (cmStep == 2) {
                 collectTexts();
@@ -107,15 +119,18 @@ public class TikTokWatcher extends AccessibilityService {
         if (cmOpened) performGlobalAction(GLOBAL_ACTION_BACK);  // zamknij panel komentarzy
         JSONArray arr = new JSONArray();
         for (String t : cmTexts) arr.put(t);
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_COMMENTS, arr.toString()).apply();
+        cmDbg.insert(0, (cmOpened ? "kliknięto komentarze" : "nie kliknięto — czytam ekran") + ", tekstów: " + cmTexts.size() + "\n");
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_COMMENTS, arr.toString())
+                .putString(KEY_CM_DBG, cmDbg.toString()).apply();
         Intent i = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                .putExtra(MainActivity.EXTRA_COMMENTS, cmOpened);
+                .putExtra(MainActivity.EXTRA_COMMENTS, cmOpened || !cmTexts.isEmpty());
         try { startActivity(i); } catch (Exception ignored) { }
     }
 
     /** Przycisk komentarzy na prawym pasku (nie pole „Dodaj komentarz”). */
     private boolean clickComments() {
+        cmDbg.setLength(0);  // diagnostyka tylko z ostatniej próby
         try {
             for (AccessibilityWindowInfo w : getWindows()) {
                 AccessibilityNodeInfo r = w.getRoot();
@@ -136,9 +151,15 @@ public class TikTokWatcher extends AccessibilityService {
             Rect b = new Rect();
             n.getBoundsInScreen(b);
             CharSequence d = n.getContentDescription() != null ? n.getContentDescription() : n.getText();
-            if (d != null && b.width() > 0 && wb.contains(b.centerX(), b.centerY())
-                    && b.centerX() > wb.left + wb.width() * 0.6          // prawy pasek przycisków
-                    && COMMENT_RE.matcher(d).find() && !ADD_COMMENT_RE.matcher(d).find()) return n;
+            if (d != null && b.width() > 0 && wb.contains(b.centerX(), b.centerY()) && COMMENT_RE.matcher(d).find()) {
+                String ds = d.toString().trim();
+                int xPct = wb.width() > 0 ? (b.centerX() - wb.left) * 100 / wb.width() : 0;
+                boolean right = xPct > 60;                               // prawy pasek przycisków
+                boolean add = ADD_COMMENT_RE.matcher(ds).find();
+                if (cmDbg.length() < 1500) cmDbg.append(right && !add ? "✓ " : "✗ ").append(ds.length() > 60 ? ds.substring(0, 60) : ds)
+                        .append(" @x=").append(xPct).append("%").append(n.isClickable() ? " klik" : "").append('\n');
+                if (right && !add) return n;
+            }
         }
         for (int i = 0; i < n.getChildCount(); i++) {
             AccessibilityNodeInfo f = findComment(n.getChild(i), wb, depth + 1);

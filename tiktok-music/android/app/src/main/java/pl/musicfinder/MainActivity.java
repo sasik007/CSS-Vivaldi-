@@ -1047,6 +1047,7 @@ public class MainActivity extends Activity {
                 o.put("scanAgo", ago(p.getLong(TikTokWatcher.KEY_DBG_TIME, 0)));
                 String d = p.getString(TikTokWatcher.KEY_DBG, null);
                 if (d != null) o.put("scan", new JSONObject(d));
+                o.put("comments", p.getString(TikTokWatcher.KEY_CM_DBG, ""));
                 o.put("android", Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")");
                 o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                 return o.toString();
