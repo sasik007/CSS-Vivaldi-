@@ -19,7 +19,7 @@ function callP(onProgress, method, ...args) {
 }
 
 // --- przełączniki źródeł
-const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails2: false, comments: true };
+const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails2: false, commentsAuto: false };
 try { Object.assign(src, JSON.parse(localStorage.getItem("sources") || "{}")); } catch {}
 document.querySelectorAll("[data-src]").forEach(cb => {
   cb.checked = !!src[cb.dataset.src];
@@ -1023,9 +1023,9 @@ function startComments(key) {
 }
 /** Po nieudanym wyszukaniu: w okienku obok TikToka czytaj komentarze automatycznie, inaczej przycisk. */
 function maybeComments(key) {
-  if (key !== cardKey || verifiedBest(lastTarget) || !src.comments) return;
+  if (key !== cardKey || verifiedBest(lastTarget)) return;
   showCommentsFact();
-  if (Android.isMultiWindow && Android.isMultiWindow() && Android.watcherEnabled())
+  if (src.commentsAuto && Android.isMultiWindow && Android.isMultiWindow() && Android.watcherEnabled())
     setTimeout(() => { if (key === cardKey && document.visibilityState === "visible" && $("#modal").hidden) startComments(key); }, 1200);
 }
 

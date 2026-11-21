@@ -70,6 +70,8 @@ public class TikTokWatcher extends AccessibilityService {
     private int cmStep = 0;
     private long cmDeadline = 0;
     private boolean cmOpened = false;
+    private boolean cmClicked = false;
+    private int cmBefore = 0;   // ile napisów było przed kliknięciem
     private final java.util.LinkedHashSet<String> cmTexts = new java.util.LinkedHashSet<>();
 
     /** Otwiera komentarze bieżącego filmu, odczytuje je i zamyka. false = usługa wyłączona. */
@@ -80,6 +82,7 @@ public class TikTokWatcher extends AccessibilityService {
             w.h.removeCallbacks(w.cmTick);
             w.cmStep = 1;
             w.cmOpened = false;
+            w.cmClicked = false;
             w.cmTexts.clear();
             w.cmDeadline = System.currentTimeMillis() + 9000;
             w.cmClickUntil = System.currentTimeMillis() + 3000 + (tiktokVisible ? 0 : 800);
@@ -95,7 +98,11 @@ public class TikTokWatcher extends AccessibilityService {
             if (cmStep == 0) return;
             if (System.currentTimeMillis() > cmDeadline) { finishComments(); return; }
             if (cmStep == 1) {
-                if (clickComments()) { cmOpened = true; cmStep = 2; h.postDelayed(this, 1500); }
+                // policz napisy przed kliknięciem — po otwarciu panelu powinno ich wyraźnie przybyć
+                cmTexts.clear();
+                collectTexts();
+                cmBefore = cmTexts.size();
+                if (clickComments()) { cmClicked = true; cmStep = 2; h.postDelayed(this, 1500); }
                 else if (System.currentTimeMillis() > cmClickUntil) {
                     // nie da się kliknąć — może komentarze są już otwarte ręcznie: czytaj ekran
                     collectTexts();
@@ -103,12 +110,15 @@ public class TikTokWatcher extends AccessibilityService {
                 }
                 else h.postDelayed(this, 250);
             } else if (cmStep == 2) {
+                // bez przewijania (przewijanie potrafiło przełączyć film) — tylko pierwsza strona komentarzy
+                cmTexts.clear();
                 collectTexts();
-                scrollComments();
+                cmOpened = cmTexts.size() > cmBefore + 3;
                 cmStep = 3;
-                h.postDelayed(this, 1000);
+                h.postDelayed(this, 700);   // chwila na doładowanie komentarzy
             } else if (cmStep == 3) {
                 collectTexts();
+                if (!cmOpened) cmOpened = cmTexts.size() > cmBefore + 3;
                 finishComments();
             }
         }
@@ -119,7 +129,8 @@ public class TikTokWatcher extends AccessibilityService {
         if (cmOpened) performGlobalAction(GLOBAL_ACTION_BACK);  // zamknij panel komentarzy
         JSONArray arr = new JSONArray();
         for (String t : cmTexts) arr.put(t);
-        cmDbg.insert(0, (cmOpened ? "kliknięto komentarze" : "nie kliknięto — czytam ekran") + ", tekstów: " + cmTexts.size() + "\n");
+        cmDbg.insert(0, (cmOpened ? "komentarze otwarte" : cmClicked ? "kliknięto, ale panel się nie otworzył" : "nie kliknięto — czytam ekran")
+                + ", napisów: " + cmBefore + " → " + cmTexts.size() + "\n");
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_COMMENTS, arr.toString())
                 .putString(KEY_CM_DBG, cmDbg.toString()).apply();
         Intent i = new Intent(this, MainActivity.class)
@@ -189,27 +200,6 @@ public class TikTokWatcher extends AccessibilityService {
         for (int i = 0; i < n.getChildCount(); i++) collectFrom(n.getChild(i), depth + 1);
     }
 
-    /** Przewija listę komentarzy raz w dół, żeby zobaczyć więcej. */
-    private void scrollComments() {
-        try {
-            for (AccessibilityWindowInfo w : getWindows()) {
-                AccessibilityNodeInfo r = w.getRoot();
-                if (r == null || !isTikTok(r.getPackageName())) continue;
-                AccessibilityNodeInfo sc = findScrollable(r, 0);
-                if (sc != null) { sc.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); return; }
-            }
-        } catch (Exception ignored) { }
-    }
-
-    private AccessibilityNodeInfo findScrollable(AccessibilityNodeInfo n, int depth) {
-        if (n == null || depth > 60) return null;
-        // najgłębsza przewijalna lista (panel komentarzy), nie cały feed
-        for (int i = 0; i < n.getChildCount(); i++) {
-            AccessibilityNodeInfo f = findScrollable(n.getChild(i), depth + 1);
-            if (f != null) return f;
-        }
-        return n.isScrollable() && n.isVisibleToUser() ? n : null;
-    }
     private long grabDeadline = 0;
 
     @Override
