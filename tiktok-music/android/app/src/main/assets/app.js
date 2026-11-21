@@ -226,14 +226,7 @@ async function updateFullUI(target, ytQuery) {
     el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">(${esc(song.artist || "")} — ${esc(song.title)})</small>`;
     return;
   }
-  // brak w katalogu → przybliżony czas z pierwszego wyniku YouTube
-  el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">sprawdzam na YouTube…</small>`;
-  try {
-    const v = JSON.parse(await call("youtubeSearch", ytQuery)).find(x => x.length);
-    el.innerHTML = v
-      ? `<span class="badge">⏱ Czas</span><b>~${esc(v.length)}</b> <small class="muted">(wg YouTube: ${esc(v.title)})</small>`
-      : `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`;
-  } catch { el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`; }
+  el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><small class="muted">nieznana — nie znaleziono tego utworu w katalogu</small>`;
 }
 
 /** Otwiera film z piosenką w aplikacji YouTube (pod filmem: ⬇️ Pobierz — z Premium). */
@@ -434,7 +427,7 @@ async function analyze(url) {
         <div class="info">
           <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
-          ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
+          ${m.duration ? `<p><span class="badge">⏱ Na TikToku</span><b>${fmt(m.duration)}</b> <small class="muted">(dźwięk)</small></p>` : ""}
           <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
           <div class="row np-actions">
             <button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button>
@@ -590,7 +583,14 @@ function originalAuthor(title) {
   return m ? m[1].replace(/[^\p{L}\p{N} _.-]/gu, "").trim() : "";
 }
 
-window.handleNowPlaying = async (title, hint = "") => {
+function tiktokTimeHtml(sec) {
+  return `<span class="badge">⏱ Na TikToku</span>` + (sec > 0
+    ? `<b>${fmt(sec)}</b>`
+    : `<small class="muted">nieznany — dokładny czas pokaże się po „Pobierz urywek”</small>`);
+}
+window.updateTikTokTime = (sec) => { const el = $("#tt-len"); if (el) el.innerHTML = tiktokTimeHtml(sec); };
+
+window.handleNowPlaying = async (title, hint = "", dur = 0) => {
   showTab("link");
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
@@ -604,6 +604,7 @@ window.handleNowPlaying = async (title, hint = "") => {
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
       ${orig && !useCap ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.</p>` : ""}
       ${useCap ? `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>` : ""}
+      <p id="tt-len">${tiktokTimeHtml(dur)}</p>
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
       <div class="row np-actions">
         <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
@@ -660,6 +661,7 @@ $("#btn-diag").onclick = () => {
     `Ostatni odczyt TikToka: ${ago(d.scanAgo)}`,
     `Wykryty dźwięk: ${d.title ? `„${d.title}” (${ago(d.titleAgo)})` : "brak"}`,
     `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
+    `Pasek postępu filmu: ${sc.range || "-"}`,
     `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
     ``,
     `Kandydaci na nazwę dźwięku (✓ = użyty, bo jest na ekranie):`,

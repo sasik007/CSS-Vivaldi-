@@ -306,10 +306,18 @@ public class MainActivity extends Activity {
         long at = p.getLong(TikTokWatcher.KEY_TIME, 0);
         if (title.isEmpty() || System.currentTimeMillis() - at > 10 * 60_000) return;
         String hint = p.getString(TikTokWatcher.KEY_HINT, "");
+        long dur = p.getLong(TikTokWatcher.KEY_DUR, 0);
         String key = title + "|" + hint;
-        if (key.equals(p.getString("np_shown", ""))) return;
-        p.edit().putString("np_shown", key).apply();
-        String js = "window.handleNowPlaying(" + JSONObject.quote(title) + "," + JSONObject.quote(hint) + ")";
+        if (key.equals(p.getString("np_shown", ""))) {
+            // ten sam film — zaktualizuj tylko czas, jeśli pojawił się później
+            if (dur != p.getLong("np_shown_dur", -1)) {
+                p.edit().putLong("np_shown_dur", dur).apply();
+                if (uiReady) ui.evaluateJavascript("window.updateTikTokTime && window.updateTikTokTime(" + dur + ")", null);
+            }
+            return;
+        }
+        p.edit().putString("np_shown", key).putLong("np_shown_dur", dur).apply();
+        String js = "window.handleNowPlaying(" + JSONObject.quote(title) + "," + JSONObject.quote(hint) + "," + dur + ")";
         if (uiReady) ui.evaluateJavascript(js, null); else pendingJs = js;
     }
 

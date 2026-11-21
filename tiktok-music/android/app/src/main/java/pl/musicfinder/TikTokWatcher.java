@@ -29,6 +29,9 @@ public class TikTokWatcher extends AccessibilityService {
     static final String KEY_TIME = "np_time";
     /** Hashtagi / opis bieżącego filmu — podpowiedź tytułu przy „oryginalnym dźwięku”. */
     static final String KEY_HINT = "np_hint";
+    /** Długość bieżącego filmu w TikToku (s), z paska postępu; 0 = nieznana. */
+    static final String KEY_DUR = "np_dur";
+    private static final Pattern TIME_PAIR = Pattern.compile("(\\d{1,2}):(\\d{2})\\s*/\\s*(\\d{1,2}):(\\d{2})");
     static final String KEY_DBG = "dbg_json";
     static final String KEY_DBG_TIME = "dbg_time";
 
@@ -147,6 +150,9 @@ public class TikTokWatcher extends AccessibilityService {
     private final List<String> seen = new ArrayList<>();
     private final List<String> cands = new ArrayList<>();
     private String hint;
+    private double durSec;       // najlepsza znaleziona długość filmu
+    private int durWidth;        // szerokość paska, z którego ją wzięto
+    private String rangeDbg;
     private final List<String> captions = new ArrayList<>();
     private static final Pattern UI_TEXT = Pattern.compile(
             "^(zobacz tłumaczenie|więcej|mniej|obserwuj|obserwowani|polub|udostępnij|dodaj komentarz|"
@@ -169,6 +175,9 @@ public class TikTokWatcher extends AccessibilityService {
         cands.clear();
         hint = null;
         captions.clear();
+        durSec = 0;
+        durWidth = 0;
+        rangeDbg = null;
         int windows = 0;
 
         // 1) wszystkie okna (okienko, podzielony ekran) — szukamy tych należących do TikToka
@@ -203,7 +212,7 @@ public class TikTokWatcher extends AccessibilityService {
         JSONArray cj = new JSONArray();
         for (String s : cands) cj.put(s);
         e.putString(KEY_DBG, "{\"windows\":" + windows + ",\"nodes\":" + nodeCount + ",\"texts\":" + dbg
-                + ",\"candidates\":" + cj + "}");
+                + ",\"candidates\":" + cj + ",\"range\":" + org.json.JSONObject.quote(rangeDbg == null ? "brak" : rangeDbg) + "}");
         e.putLong(KEY_DBG_TIME, now);
         if (best != null) {
             String title = clean(best);
@@ -214,9 +223,32 @@ public class TikTokWatcher extends AccessibilityService {
                 for (String c : captions) hb.append(c).append('\n');
                 if (hint != null && !captions.contains(hint)) hb.append(hint);
                 e.putString(KEY_HINT, hb.toString().trim());
+                e.putLong(KEY_DUR, Math.round(durSec));
             }
         }
         e.apply();
+    }
+
+    /** Pasek postępu filmu (SeekBar/ProgressBar) albo napis „0:05 / 0:31”. */
+    private void readDuration(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo.RangeInfo r = n.getRangeInfo();
+        if (r != null && r.getMax() > 0 && tmp.width() > durWidth) {
+            float max = r.getMax();
+            rangeDbg = n.getClassName() + " typ=" + r.getType() + " " + r.getCurrent() + "/" + max + " szer=" + tmp.width();
+            if (r.getType() != AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_PERCENT && max > 1) {
+                double sec = max > 1000 ? max / 1000.0 : max;  // ms albo sekundy
+                if (sec >= 1 && sec < 4 * 3600) { durSec = sec; durWidth = tmp.width(); }
+            }
+        }
+        for (CharSequence cs : new CharSequence[]{n.getText(), n.getContentDescription()}) {
+            if (cs == null) continue;
+            Matcher m = TIME_PAIR.matcher(cs);
+            if (m.find()) {
+                durSec = Integer.parseInt(m.group(3)) * 60 + Integer.parseInt(m.group(4));
+                durWidth = Integer.MAX_VALUE;
+                rangeDbg = "napis: " + m.group();
+            }
+        }
     }
 
     private static boolean isTikTok(CharSequence pkg) {
@@ -236,6 +268,7 @@ public class TikTokWatcher extends AccessibilityService {
                     && win.contains(tmp.centerX(), tmp.centerY());
             consider(n.getText(), onScreen);
             consider(n.getContentDescription(), onScreen);
+            if (onScreen) readDuration(n);
         }
         for (int i = 0; i < n.getChildCount(); i++) {
             AccessibilityNodeInfo c = n.getChild(i);
