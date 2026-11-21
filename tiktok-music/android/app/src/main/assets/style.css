@@ -66,3 +66,13 @@ main { padding-top: max(14px, env(safe-area-inset-top)); }
 .facts dd { margin: 0; overflow-wrap: anywhere; }
 .facts.file { background: #111118; border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
 .tag { display: inline-block; font-size: .7rem; padding: 0 5px; border-radius: 4px; background: #555; color: #fff; }
+.setup { background: #1d1530; border: 1px solid var(--cyan); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; font-size: .9rem; }
+.setup p, .setup ol { margin: 6px 0; padding-left: 18px; }
+.setup p { padding-left: 0; }
+.setup a { color: var(--cyan); }
+#player-box { background: #000; border-radius: var(--radius); overflow: hidden; margin-bottom: 12px; border: 1px solid var(--line); }
+.player-wrap { position: relative; aspect-ratio: 16 / 9; }
+.player-wrap iframe, .player-wrap #yt { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.player-bar { padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--card); }
+#yt-title { font-size: .9rem; font-weight: 600; }
+[hidden] { display: none !important; }

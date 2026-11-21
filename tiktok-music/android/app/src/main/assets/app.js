@@ -41,14 +41,14 @@ async function searchSongs(term) {
 function ytSearch(q) {
   return "https://www.youtube.com/results?search_query=" + encodeURIComponent(q.trim());
 }
-function ytButton(q, label = "▶ Szukaj całej piosenki w YouTube") {
-  return `<button class="btn yt" data-open="${esc(ytSearch(q))}">${label}</button>`;
+function ytButton(q, label = "▶ Odtwórz całą piosenkę") {
+  return `<button class="btn yt" data-play="${esc(q.trim())}">${label}</button>`;
 }
 
 function storeLinks(s) {
   const q = `${s.artist} ${s.title}`.trim(), e = encodeURIComponent(q);
   return [
-    ["▶ YouTube", ytSearch(q)],
+    ["YouTube", ytSearch(q)],
     ["Spotify", `https://open.spotify.com/search/${e}`],
     ["YT Music", `https://music.youtube.com/search?q=${e}`],
     ["Apple Music", s.apple],
@@ -59,8 +59,8 @@ function storeLinks(s) {
 function renderResults(list) {
   resultsEl.innerHTML = "";
   list.forEach((s, i) => {
-    const links = storeLinks(s).map(([n, u], j) =>
-      `<button class="btn ${j === 0 ? "yt" : "ghost"} small" data-open="${esc(u)}">${n}</button>`).join("");
+    const links = `<button class="btn yt small" data-play="${esc(`${s.artist} ${s.title}`)}">▶ Odtwórz</button>` +
+      storeLinks(s).map(([n, u]) => `<button class="btn ghost small" data-open="${esc(u)}">${n}</button>`).join("");
     resultsEl.insertAdjacentHTML("beforeend", `
       <article class="song ${i === 0 ? "best" : ""}">
         <div class="top">
@@ -83,7 +83,54 @@ function renderResults(list) {
 document.addEventListener("click", (e) => {
   const b = e.target.closest("[data-open]");
   if (b) Android.openUrl(b.dataset.open);
+  const p = e.target.closest("[data-play]");
+  if (p) playYouTube(p.dataset.play);
 });
+
+// --- odtwarzacz YouTube w aplikacji (oficjalny odtwarzacz osadzony)
+let ytApi = null, ytPlayer = null, ytList = [], ytIdx = 0, ytQuery = "";
+function loadYtApi() {
+  if (ytApi) return ytApi;
+  ytApi = new Promise((res, rej) => {
+    window.onYouTubeIframeAPIReady = res;
+    const sc = document.createElement("script");
+    sc.src = "https://www.youtube.com/iframe_api";
+    sc.onerror = () => { ytApi = null; rej(new Error("Nie można załadować odtwarzacza YouTube")); };
+    document.head.appendChild(sc);
+  });
+  return ytApi;
+}
+function ytShow(i) {
+  ytIdx = i;
+  const v = ytList[i];
+  $("#yt-title").textContent = v.title;
+  if (ytPlayer) ytPlayer.loadVideoById(v.id);
+  else ytPlayer = new YT.Player("yt", {
+    videoId: v.id, width: "100%", height: "100%",
+    playerVars: { autoplay: 1, playsinline: 1, rel: 0 },
+    events: { onError: () => {  // np. film zablokowany do osadzania → następny
+      if (ytIdx + 1 < ytList.length) ytShow(ytIdx + 1);
+      else setStatus("Tego utworu nie da się odtworzyć w aplikacji — kliknij „Otwórz w YouTube”.", true);
+    } },
+  });
+}
+async function playYouTube(query) {
+  ytQuery = query;
+  const box = $("#player-box");
+  box.hidden = false;
+  $("#yt-title").textContent = "⏳ Szukam na YouTube: " + query;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    const [list] = await Promise.all([call("youtubeSearch", query).then(JSON.parse), loadYtApi()]);
+    ytList = list;
+    ytShow(0);
+  } catch (err) {
+    $("#yt-title").textContent = "❌ " + err.message;
+  }
+}
+$("#yt-next").onclick = () => ytList.length && ytShow((ytIdx + 1) % ytList.length);
+$("#yt-open").onclick = () => Android.openUrl(ytList[ytIdx] ? "https://www.youtube.com/watch?v=" + ytList[ytIdx].id : ytSearch(ytQuery));
+$("#yt-close").onclick = () => { if (ytPlayer) ytPlayer.stopVideo(); $("#player-box").hidden = true; };
 document.addEventListener("play", (e) => {  // tylko jeden odsłuch naraz
   document.querySelectorAll("audio").forEach(a => a !== e.target && a.pause());
 }, true);
@@ -196,7 +243,40 @@ $("#form-search").onsubmit = async (e) => {
 $("#btn-yt").onclick = () => {
   const q = $("#q").value.trim();
   if (!q) return $("#q").focus();
-  Android.openUrl(ytSearch(q));
+  playYouTube(q);
 };
+
+// --- „Teraz na TikToku” (z usługi wykrywania)
+window.handleNowPlaying = async (title) => {
+  showTab("link");
+  resultsEl.innerHTML = "";
+  const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
+  const q = title.replace(/\s+-\s+/g, " ");
+  $("#video-box").innerHTML = `
+    <div class="video"><div class="info">
+      <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
+      <p>${ytButton(q)}</p>
+    </div></div>`;
+  if (orig) return setStatus("To „oryginalny dźwięk” — spróbuj 🎙️ Rozpoznaj albo udostępnij film do aplikacji.", true);
+  setStatus("⏳ Szukam pełnej wersji…");
+  try {
+    const r = await searchSongs(q);
+    $("#q").value = q;
+    if (r.length) { setStatus(`✅ Pełna wersja „${title}”:`); renderResults(r); }
+    else setStatus("Nie znaleziono w katalogu — kliknij ▶ Odtwórz, poszukamy na YouTube.", true);
+  } catch (err) { setStatus("❌ " + err.message, true); }
+};
+
+// --- baner włączenia wykrywania
+let setupHidden = false;
+try { setupHidden = localStorage.getItem("setupHidden") === "1"; } catch {}
+window.refreshSetup = () => { $("#setup").hidden = setupHidden || Android.watcherEnabled(); };
+$("#btn-setup").onclick = () => Android.openWatcherSettings();
+$("#app-settings").onclick = (e) => { e.preventDefault(); Android.openAppSettings(); };
+$("#btn-setup-hide").onclick = () => {
+  setupHidden = true; $("#setup").hidden = true;
+  try { localStorage.setItem("setupHidden", "1"); } catch {}
+};
+refreshSetup();
 
 $("#btn-rec").onclick = () => Android.recognize();

@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">Music Finder</string>
     <string name="share_label">Znajdź piosenkę</string>
+    <string name="watcher_label">Music Finder — wykrywanie dźwięku z TikToka</string>
+    <string name="watcher_desc">Gdy oglądasz TikToka, Music Finder odczytuje z ekranu nazwę dźwięku bieżącego filmu, żeby po otwarciu od razu pokazać, co leci. Działa tylko w aplikacji TikTok. Nic nie jest wysyłane ani zapisywane poza nazwą dźwięku w telefonie.</string>
 </resources>

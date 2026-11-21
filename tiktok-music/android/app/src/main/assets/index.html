@@ -19,6 +19,28 @@
     <button class="tab" data-tab="mic">🎙️ Rozpoznaj</button>
   </nav>
 
+  <div id="setup" class="setup" hidden>
+    <b>⚡ Automatyczne wykrywanie</b>
+    <p>Oglądasz TikToka → otwierasz Music Finder → od razu widzisz, co leci. Włącz raz w ustawieniach:</p>
+    <ol>
+      <li><b>Ułatwienia dostępu</b> → <b>Music Finder — wykrywanie dźwięku</b> → włącz.</li>
+      <li>Jeśli opcja jest szara („ustawienie ograniczone”): <a href="#" id="app-settings">Informacje o aplikacji</a> → ⋮ → <b>Zezwól na ustawienia z ograniczeniami</b>, potem krok 1.</li>
+    </ol>
+    <div class="row"><button id="btn-setup">Otwórz ustawienia</button><button class="btn ghost" id="btn-setup-hide">Nie teraz</button></div>
+  </div>
+
+  <section id="player-box" hidden>
+    <div class="player-wrap"><div id="yt"></div></div>
+    <div class="player-bar">
+      <span id="yt-title"></span>
+      <div class="row">
+        <button class="btn ghost small" id="yt-next">⏭ Inny film</button>
+        <button class="btn ghost small" id="yt-open">Otwórz w YouTube</button>
+        <button class="btn ghost small" id="yt-close">✕</button>
+      </div>
+    </div>
+  </section>
+
   <section class="panel active" id="tab-link">
     <form id="form-link" class="row">
       <input id="tt-url" type="url" inputmode="url" placeholder="Link do filmu z TikToka" required>
@@ -35,7 +57,7 @@
       <input id="q" type="text" placeholder="Tytuł, wykonawca, fragment tekstu…" required>
       <button type="submit">Szukaj</button>
     </form>
-    <p><button type="button" id="btn-yt" class="btn yt">▶ Szukaj w YouTube</button></p>
+    <p><button type="button" id="btn-yt" class="btn yt">▶ Odtwórz z YouTube</button></p>
   </section>
 
   <section class="panel" id="tab-mic">

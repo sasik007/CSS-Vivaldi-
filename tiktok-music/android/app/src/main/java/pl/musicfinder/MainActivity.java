@@ -8,6 +8,7 @@ import android.content.ClipboardManager;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -24,15 +25,18 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
@@ -45,6 +49,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -84,6 +89,8 @@ public class MainActivity extends Activity {
             + "}catch(e){return null;}})()";
 
     static final String SHORTCUT_ID = "find_song";
+    /** Interfejs ładujemy z wirtualnego adresu https (potrzebne, by działał odtwarzacz YouTube). */
+    static final String APP_HOST = "appassets.musicfinder.local";
     static final Pattern TT_LINK = Pattern.compile("https?://\\S*tiktok\\.com/\\S+", Pattern.CASE_INSENSITIVE);
 
     private WebView ui;
@@ -92,6 +99,7 @@ public class MainActivity extends Activity {
     private boolean uiReady = false;
     private String pendingShare = null;
     private long lastShareAt = 0;
+    private String pendingJs = null;
 
     // stan bieżącego odczytu TikToka
     private int scrapeId = 0;
@@ -132,25 +140,41 @@ public class MainActivity extends Activity {
         WebSettings us = ui.getSettings();
         us.setJavaScriptEnabled(true);
         us.setDomStorageEnabled(true);
+        us.setMediaPlaybackRequiresUserGesture(false);
         ui.addJavascriptInterface(new Bridge(), "Android");
         ui.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                if ("file".equals(r.getUrl().getScheme())) return false;
+                if (!r.isForMainFrame() || APP_HOST.equals(r.getUrl().getHost())) return false;
                 openExternal(r.getUrl().toString());
                 return true;
+            }
+
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) {
+                Uri u = r.getUrl();
+                if (!APP_HOST.equals(u.getHost())) return null;
+                String path = u.getPath() == null || u.getPath().equals("/") ? "/index.html" : u.getPath();
+                String mime = path.endsWith(".html") ? "text/html" : path.endsWith(".js") ? "application/javascript"
+                        : path.endsWith(".css") ? "text/css" : path.endsWith(".png") ? "image/png" : "application/octet-stream";
+                try {
+                    return new WebResourceResponse(mime, "UTF-8", getAssets().open(path.substring(1)));
+                } catch (IOException e) {
+                    return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", null, null);
+                }
             }
 
             @Override
             public void onPageFinished(WebView v, String url) {
                 uiReady = true;
                 if (pendingShare != null) { deliverShare(pendingShare); pendingShare = null; }
+                else if (pendingJs != null) { v.evaluateJavascript(pendingJs, null); pendingJs = null; }
             }
         });
         root.addView(ui, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(root);
 
-        ui.loadUrl("file:///android_asset/index.html");
+        ui.loadUrl("https://" + APP_HOST + "/index.html");
         publishShareShortcut();
         handleIntent(getIntent());
 
@@ -217,21 +241,45 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (!hasFocus || System.currentTimeMillis() - lastShareAt < 5000) return;
+        if (!hasFocus) return;
+        if (uiReady) ui.evaluateJavascript("window.refreshSetup && window.refreshSetup()", null);
+        if (System.currentTimeMillis() - lastShareAt < 5000) return;
         main.postDelayed(() -> {
+            if (checkClipboard()) return;
+            checkNowPlaying();
+        }, 300);
+    }
+
+    /** Dźwięk odczytany przez TikTokWatcher w ciągu ostatnich 10 minut, jeszcze nie pokazany. */
+    private void checkNowPlaying() {
+        SharedPreferences p = getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE);
+        String title = p.getString(TikTokWatcher.KEY_TITLE, "");
+        long at = p.getLong(TikTokWatcher.KEY_TIME, 0);
+        if (title.isEmpty() || System.currentTimeMillis() - at > 10 * 60_000) return;
+        String key = title + "@" + at;
+        if (key.equals(p.getString("np_shown", ""))) return;
+        p.edit().putString("np_shown", key).apply();
+        String js = "window.handleNowPlaying(" + JSONObject.quote(title) + ")";
+        if (uiReady) ui.evaluateJavascript(js, null); else pendingJs = js;
+    }
+
+    private boolean checkClipboard() {
+        {
             try {
                 ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                 ClipData clip = cm == null ? null : cm.getPrimaryClip();
-                if (clip == null || clip.getItemCount() == 0) return;
+                if (clip == null || clip.getItemCount() == 0) return false;
                 CharSequence t = clip.getItemAt(0).coerceToText(this);
                 String link = extractLink(t == null ? null : t.toString());
-                if (link == null) return;
+                if (link == null) return false;
                 String last = getSharedPreferences("mf", MODE_PRIVATE).getString("last", "");
-                if (link.equals(last)) return;  // ten link już był
+                if (link.equals(last)) return false;  // ten link już był
                 rememberLink(link);
                 if (uiReady) deliverShare(link); else pendingShare = link;
+                return true;
             } catch (Exception ignored) { }
-        }, 300);
+            return false;
+        }
     }
 
     private void deliverShare(String text) {
@@ -540,6 +588,60 @@ public class MainActivity extends Activity {
             if (clip == null || clip.getItemCount() == 0) return "";
             CharSequence t = clip.getItemAt(0).coerceToText(MainActivity.this);
             return t == null ? "" : t.toString();
+        }
+
+        /** Wyszukuje filmy na YouTube (do odtwarzania w aplikacji). Zwraca [{id, title}]. */
+        @JavascriptInterface
+        public void youtubeSearch(int id, String query) {
+            new Thread(() -> {
+                try {
+                    String url = "https://www.youtube.com/results?search_query=" + URLEncoder.encode(query, "UTF-8");
+                    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                    c.setConnectTimeout(15_000);
+                    c.setReadTimeout(20_000);
+                    c.setRequestProperty("User-Agent", DESKTOP_UA);
+                    c.setRequestProperty("Accept-Language", "pl-PL,pl;q=0.9,en;q=0.8");
+                    c.setRequestProperty("Cookie", "SOCS=CAI; CONSENT=YES+1");  // pomija ekran zgody cookies (UE)
+                    String body;
+                    try (InputStream in = c.getInputStream()) { body = readAll(in); }
+                    Matcher m = Pattern.compile(
+                            "\"videoRenderer\":\\{\"videoId\":\"([\\w-]{11})\".{0,4000}?\"title\":\\{\"runs\":\\[\\{\"text\":\"((?:[^\"\\\\]|\\\\.)*)\"")
+                            .matcher(body);
+                    JSONArray arr = new JSONArray();
+                    while (m.find() && arr.length() < 6) {
+                        String title;
+                        try { title = (String) new JSONTokener("\"" + m.group(2) + "\"").nextValue(); }
+                        catch (Exception e) { title = m.group(2); }
+                        arr.put(new JSONObject().put("id", m.group(1)).put("title", title));
+                    }
+                    if (arr.length() == 0) throw new IOException("brak wyników");
+                    reply(id, true, arr.toString());
+                } catch (Exception e) {
+                    reply(id, false, "Nie udało się wyszukać na YouTube (" + e.getMessage() + ")");
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public boolean watcherEnabled() {
+            String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            return s != null && s.contains(getPackageName() + "/");
+        }
+
+        @JavascriptInterface
+        public void openWatcherSettings() {
+            main.post(() -> {
+                try { startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); } catch (Exception ignored) { }
+            });
+        }
+
+        @JavascriptInterface
+        public void openAppSettings() {
+            main.post(() -> {
+                try {
+                    startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+                } catch (Exception ignored) { }
+            });
         }
 
         @JavascriptInterface
