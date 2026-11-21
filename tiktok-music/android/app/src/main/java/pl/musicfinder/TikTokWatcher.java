@@ -147,6 +147,11 @@ public class TikTokWatcher extends AccessibilityService {
     private final List<String> seen = new ArrayList<>();
     private final List<String> cands = new ArrayList<>();
     private String hint;
+    private final List<String> captions = new ArrayList<>();
+    private static final Pattern UI_TEXT = Pattern.compile(
+            "^(zobacz tłumaczenie|więcej|mniej|obserwuj|obserwowani|polub|udostępnij|dodaj komentarz|wyszukiwanie|"
+            + "dla ciebie|profil|see translation|more|follow|like|share|add comment|search|teraz live|live)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final Rect win = new Rect();
     private final Rect tmp = new Rect();
 
@@ -162,6 +167,7 @@ public class TikTokWatcher extends AccessibilityService {
         seen.clear();
         cands.clear();
         hint = null;
+        captions.clear();
         int windows = 0;
 
         // 1) wszystkie okna (okienko, podzielony ekran) — szukamy tych należących do TikToka
@@ -202,7 +208,11 @@ public class TikTokWatcher extends AccessibilityService {
             String title = clean(best);
             if (!title.isEmpty()) {
                 e.putString(KEY_TITLE, title).putLong(KEY_TIME, now);
-                e.putString(KEY_HINT, hint == null ? "" : hint);
+                // podpowiedzi: opis filmu (np. „DJ Jay feat. Eve – Move On”) + hashtagi
+                StringBuilder hb = new StringBuilder();
+                for (String c : captions) hb.append(c).append('\n');
+                if (hint != null && !captions.contains(hint)) hb.append(hint);
+                e.putString(KEY_HINT, hb.toString().trim());
             }
         }
         e.apply();
@@ -238,6 +248,11 @@ public class TikTokWatcher extends AccessibilityService {
         if (s.isEmpty() || s.length() > 300) return;
         // opis filmu z hashtagami (pierwszy widoczny na ekranie)
         if (onScreen && hint == null && s.indexOf('#') >= 0 && s.length() < 250) hint = s;
+        // napisy w dolnej części filmu (opis, nazwa autora) — często zawierają „Wykonawca – Tytuł”
+        if (onScreen && captions.size() < 6 && s.length() >= 6 && s.length() < 250
+                && tmp.centerY() > win.top + win.height() * 0.55
+                && !UI_TEXT.matcher(s).find() && !s.matches("[\\d\\s.,]+(tys\\.|mln|k|m)?")
+                && !captions.contains(s)) captions.add(s);
         if (onScreen && seen.size() < 60 && !seen.contains(s)) seen.add(s.length() > 120 ? s.substring(0, 120) + "…" : s);
         int score = 0;
         String val = s;
@@ -245,6 +260,7 @@ public class TikTokWatcher extends AccessibilityService {
         if (m.find()) { score = 3; val = m.group(1); }
         else if (startsWithNote(s)) { score = 2; }
         else if (ORIGINAL.matcher(s).find() && s.length() < 120) { score = 1; }
+        if (score > 0) captions.remove(s);
         if (score == 0) return;
         if (cands.size() < 12) cands.add((onScreen ? "✓ " : "✗ poza ekranem ") + "[" + score + "] " + s
                 + " @" + tmp.top + "-" + tmp.bottom);
