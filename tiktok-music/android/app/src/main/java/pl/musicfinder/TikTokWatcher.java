@@ -24,6 +24,8 @@ public class TikTokWatcher extends AccessibilityService {
     static final String PREFS = "mf";
     static final String KEY_TITLE = "np_title";
     static final String KEY_TIME = "np_time";
+    /** Hashtagi / opis bieżącego filmu — podpowiedź tytułu przy „oryginalnym dźwięku”. */
+    static final String KEY_HINT = "np_hint";
     static final String KEY_DBG = "dbg_json";
     static final String KEY_DBG_TIME = "dbg_time";
 
@@ -43,6 +45,7 @@ public class TikTokWatcher extends AccessibilityService {
     private int nodeCount;
     private final List<String> seen = new ArrayList<>();
     private final List<String> cands = new ArrayList<>();
+    private String hint;
     private final Rect win = new Rect();
     private final Rect tmp = new Rect();
 
@@ -57,6 +60,7 @@ public class TikTokWatcher extends AccessibilityService {
         nodeCount = 0;
         seen.clear();
         cands.clear();
+        hint = null;
         int windows = 0;
 
         // 1) wszystkie okna (okienko, podzielony ekran) — szukamy tych należących do TikToka
@@ -95,7 +99,10 @@ public class TikTokWatcher extends AccessibilityService {
         e.putLong(KEY_DBG_TIME, now);
         if (best != null) {
             String title = clean(best);
-            if (!title.isEmpty()) e.putString(KEY_TITLE, title).putLong(KEY_TIME, now);
+            if (!title.isEmpty()) {
+                e.putString(KEY_TITLE, title).putLong(KEY_TIME, now);
+                e.putString(KEY_HINT, hint == null ? "" : hint);
+            }
         }
         e.apply();
     }
@@ -128,6 +135,8 @@ public class TikTokWatcher extends AccessibilityService {
         if (cs == null) return;
         String s = cs.toString().trim();
         if (s.isEmpty() || s.length() > 300) return;
+        // opis filmu z hashtagami (pierwszy widoczny na ekranie)
+        if (onScreen && hint == null && s.indexOf('#') >= 0 && s.length() < 250) hint = s;
         if (onScreen && seen.size() < 60 && !seen.contains(s)) seen.add(s.length() > 120 ? s.substring(0, 120) + "…" : s);
         int score = 0;
         String val = s;

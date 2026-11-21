@@ -296,9 +296,11 @@ public class MainActivity extends Activity {
         String title = p.getString(TikTokWatcher.KEY_TITLE, "");
         long at = p.getLong(TikTokWatcher.KEY_TIME, 0);
         if (title.isEmpty() || System.currentTimeMillis() - at > 10 * 60_000) return;
-        if (title.equals(p.getString("np_shown", ""))) return;
-        p.edit().putString("np_shown", title).apply();
-        String js = "window.handleNowPlaying(" + JSONObject.quote(title) + ")";
+        String hint = p.getString(TikTokWatcher.KEY_HINT, "");
+        String key = title + "|" + hint;
+        if (key.equals(p.getString("np_shown", ""))) return;
+        p.edit().putString("np_shown", key).apply();
+        String js = "window.handleNowPlaying(" + JSONObject.quote(title) + "," + JSONObject.quote(hint) + ")";
         if (uiReady) ui.evaluateJavascript(js, null); else pendingJs = js;
     }
 
@@ -308,6 +310,14 @@ public class MainActivity extends Activity {
                 ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
                 ClipData clip = cm == null ? null : cm.getPrimaryClip();
                 if (clip == null || clip.getItemCount() == 0) return false;
+                // tylko świeżo skopiowane linki (≤ 2 min) — stary link ze schowka to nie to, co teraz gra
+                if (Build.VERSION.SDK_INT >= 26) {
+                    long ts = clip.getDescription().getTimestamp();
+                    if (ts > 0) {
+                        long age = ts > 1_000_000_000_000L ? System.currentTimeMillis() - ts : SystemClock.elapsedRealtime() - ts;
+                        if (age > 2 * 60_000) return false;
+                    }
+                }
                 CharSequence t = clip.getItemAt(0).coerceToText(this);
                 String link = extractLink(t == null ? null : t.toString());
                 if (link == null) return false;

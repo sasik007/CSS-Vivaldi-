@@ -399,18 +399,32 @@ $("#btn-yt").onclick = () => {
 };
 
 // --- „Teraz na TikToku” (z usługi wykrywania)
-window.handleNowPlaying = async (title) => {
+// Hashtagi z opisu → podpowiedź tytułu („#SonicRush #DanceMusic” → „Sonic Rush”)
+const GENERIC_TAGS = /^(fyp|fy|foryou|foryoupage|fypシ|viral|trend|trending|dlaciebie|dc|xyzbca|music|muzyka|dance|dancemusic|song|remix|edit|capcut|tiktok|polska|pl|funny|love|explore|viralvideo|parati|pourtoi)$/i;
+function hintQuery(hint) {
+  const tags = [...(hint || "").matchAll(/#([\p{L}\p{N}_]+)/gu)].map(m => m[1]).filter(t => !GENERIC_TAGS.test(t));
+  const words = tags.slice(0, 2).map(t => t.replace(/_/g, " ").replace(/([a-ząćęłńóśźż])([A-ZĄĆĘŁŃÓŚŹŻ])/g, "$1 $2"));
+  return words.join(" ").trim();
+}
+function originalAuthor(title) {
+  const m = title.match(/(?:użytkownika|original sound\s*-|oryginalny dźwięk\s*-|son original\s*-|sonido original\s*-)\s*(.+)$/i);
+  return m ? m[1].replace(/[^\p{L}\p{N} _.-]/gu, "").trim() : "";
+}
+
+window.handleNowPlaying = async (title, hint = "") => {
   showTab("link");
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
-  const q = title.replace(/\s+-\s+/g, " ");
+  const hq = orig ? hintQuery(hint) : "";
+  const q = orig ? (hq || originalAuthor(title) || title) : title.replace(/\s+-\s+/g, " ");
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
+      ${orig ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.${hq ? ` Szukam po opisie filmu: <b>${esc(hq)}</b>` : ""}</p>` : ""}
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
-      <p>${ytButton(orig ? title : q, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
+      <p>${ytButton(q, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
       <div class="row np-actions">
-        <button class="btn ghost" data-open="${esc(ytSearch(orig ? title : q))}">🔎 Szukaj w YouTube</button>
+        <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
         <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
       </div>
     </div></div>`;
@@ -419,7 +433,10 @@ window.handleNowPlaying = async (title) => {
     setStatus("👉 W TikToku: Udostępnij → Kopiuj link, potem wróć tutaj — pobieranie ruszy samo.");
     Android.backToTikTok();
   };
-  if (orig) return setStatus("To „oryginalny dźwięk” — spróbuj 🎙️ Rozpoznaj albo udostępnij film do aplikacji.", true);
+  if (orig && !hq) {
+    showFullLength(null);
+    return setStatus("To „oryginalny dźwięk” bez tytułu — spróbuj 🎙️ Rozpoznaj (Shazam) albo ▶ Odtwórz z YouTube.", true);
+  }
   await searchAll(q, title);
   if (!lastCatalog.length) showFullLength(null);
 };
