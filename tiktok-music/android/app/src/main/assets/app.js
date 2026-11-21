@@ -327,17 +327,20 @@ async function analyze(url) {
         </div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = downloadCurrent;
-    // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
-    if (canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000) {
-      autoDownloadAt = 0;
-      downloadCurrent();
-    }
+    const autoDl = canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000;
+    if (autoDl) autoDownloadAt = 0;
 
     if (orig) {
-      setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
-      return;
+      // „oryginalny dźwięk” — spróbuj po hashtagach z opisu filmu
+      const hq = hintQuery(d.desc);
+      current.hint = hq;
+      if (hq) await searchAll(hq, `${hq} (z opisu filmu)`);
+      else setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
+    } else {
+      await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
     }
-    await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
+    // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
+    if (autoDl) downloadCurrent();
   } catch (err) {
     setStatus("❌ " + err.message, true);
   } finally {
@@ -345,14 +348,24 @@ async function analyze(url) {
   }
 }
 
+/** Prawdziwy tytuł i wykonawca do nazwy pliku i tagów (zamiast „TikTok”). */
+function songTag(d) {
+  const m = d.music || {};
+  if (!isOriginal(m)) return { title: m.title, artist: m.author || "" };
+  const best = lastCatalog[0];
+  if (best) return { title: best.title, artist: best.artist };
+  if (d.hint) return { title: d.hint, artist: "" };
+  return { title: m.title || "Oryginalny dźwięk", artist: m.author || d.author || "" };
+}
+
 async function downloadCurrent() {
   const d = current; if (!d) return;
   const m = d.music || {};
-  const name = (isOriginal(m) ? `tiktok-${d.author || ""}-${d.id || ""}` : `${m.author ? m.author + " - " : ""}${m.title}`)
-    .replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "tiktok";
+  const tag = songTag(d);
+  const name = safeName(`${tag.artist ? tag.artist + " - " : ""}${tag.title}`);
   const btn = $("#btn-dl"); btn.disabled = true; btn.textContent = "⏳ Pobieram…";
   try {
-    const i = JSON.parse(await callP(l => btn.textContent = "⏳ " + l, "download", m.playUrl || "", d.videoUrl || "", name));
+    const i = JSON.parse(await callP(l => btn.textContent = "⏳ " + l, "download", m.playUrl || "", d.videoUrl || "", name, tag.title, tag.artist));
     btn.textContent = "✅ Zapisano";
     $("#file-info").innerHTML = fileInfoHtml(i);
   } catch (err) {

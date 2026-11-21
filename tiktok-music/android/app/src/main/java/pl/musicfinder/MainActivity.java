@@ -461,7 +461,7 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ pobieranie
 
-    private String doDownload(String audioUrl, String videoUrl, String baseName, Job job) throws Exception {
+    private String doDownload(String audioUrl, String videoUrl, String baseName, String title, String artist, Job job) throws Exception {
         File out = null;
         String ext = "m4a", mime = "audio/mp4";
 
@@ -493,6 +493,9 @@ public class MainActivity extends Activity {
         if (out == null) throw new IOException("Brak pliku dźwięku do pobrania");
 
         String fileName = baseName + "." + ext;
+        if ("mp3".equals(ext)) {
+            try { retagMp3(out, title, artist); } catch (Exception ignored) { }
+        }
         JSONObject info = mediaInfo(out, ext);
         job.stage("Zapisuję…");
         Uri saved = saveToDownloads(out, fileName, mime);
@@ -569,6 +572,50 @@ public class MainActivity extends Activity {
         if (isMp3(f)) return new String[]{"mp3", "audio/mpeg"};
         if (head.startsWith("<")) throw new IOException("serwer zwrócił stronę zamiast pliku audio");
         return new String[]{"mp3", "audio/mpeg"};
+    }
+
+    /**
+     * Zastępuje tagi MP3 (TikTok często wpisuje tam swoje) prawdziwym tytułem i wykonawcą (ID3v2.3).
+     * Dzięki temu odtwarzacze muzyki pokazują nazwę piosenki.
+     */
+    static void retagMp3(File f, String title, String artist) throws IOException {
+        if (title == null || title.trim().isEmpty()) return;
+        byte[] data;
+        try (InputStream in = new FileInputStream(f)) {
+            ByteArrayOutputStream bo = new ByteArrayOutputStream((int) f.length());
+            copy(in, bo);
+            data = bo.toByteArray();
+        }
+        int start = 0;
+        if (data.length > 10 && data[0] == 'I' && data[1] == 'D' && data[2] == '3') {
+            int size = ((data[6] & 0x7f) << 21) | ((data[7] & 0x7f) << 14) | ((data[8] & 0x7f) << 7) | (data[9] & 0x7f);
+            start = 10 + size + ((data[5] & 0x10) != 0 ? 10 : 0);
+            if (start > data.length) start = 0;
+        }
+        int end = data.length;
+        if (end - start > 128 && data[end - 128] == 'T' && data[end - 127] == 'A' && data[end - 126] == 'G') end -= 128;
+
+        ByteArrayOutputStream frames = new ByteArrayOutputStream();
+        id3Frame(frames, "TIT2", title.trim());
+        if (artist != null && !artist.trim().isEmpty()) id3Frame(frames, "TPE1", artist.trim());
+        byte[] fr = frames.toByteArray();
+        int n = fr.length;
+        byte[] header = {'I', 'D', '3', 3, 0, 0,
+                (byte) ((n >> 21) & 0x7f), (byte) ((n >> 14) & 0x7f), (byte) ((n >> 7) & 0x7f), (byte) (n & 0x7f)};
+        try (OutputStream out = new FileOutputStream(f)) {
+            out.write(header);
+            out.write(fr);
+            out.write(data, start, end - start);
+        }
+    }
+
+    private static void id3Frame(ByteArrayOutputStream out, String id, String text) throws IOException {
+        byte[] t = text.getBytes(StandardCharsets.UTF_16);  // z BOM, kodowanie 1 w ID3v2.3
+        int size = t.length + 1;
+        out.write(id.getBytes(StandardCharsets.ISO_8859_1));
+        out.write(new byte[]{(byte) (size >> 24), (byte) (size >> 16), (byte) (size >> 8), (byte) size, 0, 0});
+        out.write(1);
+        out.write(t);
     }
 
     private static boolean isMp3(File f) throws IOException {
@@ -774,11 +821,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void download(int id, String audioUrl, String videoUrl, String baseName) {
+        public void download(int id, String audioUrl, String videoUrl, String baseName, String title, String artist) {
             new Thread(() -> {
                 Job job = new Job(id, baseName);
                 try {
-                    reply(id, true, doDownload(audioUrl, videoUrl, baseName, job));
+                    reply(id, true, doDownload(audioUrl, videoUrl, baseName, title, artist, job));
                 } catch (Exception e) {
                     job.fail(e.getMessage());
                     reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
