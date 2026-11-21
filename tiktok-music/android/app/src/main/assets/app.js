@@ -247,7 +247,7 @@ async function updateFullUI(target, ytQuery) {
   if (btn) {
     if (match) {
       btn.disabled = false;
-      btn.textContent = `⬇️ Pobierz cały utwór · ${match.format || ""}`;
+      btn.textContent = `⬇️ Pobierz cały · ${(match.format || "").split(" ")[0]}`;
       btn.title = `${match.source} · ${match.license}`;
       btn.onclick = () => downloadFullTo(btn, match.url, `${match.artist ? match.artist + " - " : ""}${match.title}`);
       $("#np-full-src").textContent = `Legalne źródło: ${match.source} · ${match.license}`;
@@ -265,15 +265,15 @@ async function updateFullUI(target, ytQuery) {
   const song = best || match;
   if (song && song.duration) {
     findYtMatch(t, ytQuery);  // w tle: dokładny film dla „Pobierz w YouTube”
-    el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">${best ? "z katalogu" : esc(song.source || "")}</small>`;
+    el.innerHTML = `<span class="badge">🎵 Cała piosenka</span><b>${fmt(song.duration)}</b><small class="muted">${best ? "katalog" : esc(song.source || "")}</small>`;
     return;
   }
   // brak w katalogu → YouTube, ale tylko film, którego tytuł zawiera tytuł piosenki
-  el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam na YouTube…</small>`;
+  el.innerHTML = `<span class="badge">🎵 Cała piosenka</span><small class="muted">sprawdzam…</small>`;
   const yt = await findYtMatch(t, ytQuery);
   el.innerHTML = yt && yt.length
-    ? `<span class="badge">⏱ Cała piosenka</span><b>${esc(yt.length)}</b> <small class="muted">z YouTube</small>`
-    : `<span class="badge">⏱ Cała piosenka</span><small class="muted">nieznana — nie znaleziono tego utworu</small>`;
+    ? `<span class="badge">🎵 Cała piosenka</span><b>${esc(yt.length)}</b><small class="muted">YouTube</small>`
+    : `<span class="badge">🎵 Cała piosenka</span><b class="none">—</b><small class="muted">nie znaleziono</small>`;
 }
 
 /** Otwiera film z piosenką w aplikacji YouTube (pod filmem: ⬇️ Pobierz — z Premium). */
@@ -292,14 +292,14 @@ document.addEventListener("click", (e) => {
   if (b) openInYtMusic(b);
 });
 
-/** Przyciski karty: główny „Pobierz urywek”, YouTube, „Pobierz cały”. */
+/** Przyciski karty w siatce 2×2: urywek | cały utwór / YouTube pobierz | YouTube szukaj. */
 function actionsHtml(q, clipBtn) {
   return `
     <div class="actions">
-      ${clipBtn ? `<span class="span2">${clipBtn}</span>` : ""}
-      <button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
-      <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
-      <span class="span2"><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button></span>
+      ${clipBtn || ""}
+      <button class="btn full ${clipBtn ? "" : "span2"}" id="np-full" disabled>⬇️ Pobierz cały</button>
+      <button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YT</button>
+      <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(q))}">🔎 Szukaj w YT</button>
     </div>
     <p id="yt-q"></p>
     <small id="np-full-src"></small>
@@ -486,10 +486,12 @@ async function analyze(url) {
         </div>
         <div class="np-sub dim">♬ ${esc(m.title || "?")}${d.desc ? ` · ${esc(d.desc.slice(0, 90))}` : ""}</div>
         <div class="facts-list">
-          ${m.duration ? `<div class="fact"><span class="badge">⏱ Na TikToku</span><b>${fmt(m.duration)}</b> <small class="muted">cały dźwięk${d.videoDuration ? ` · film ${fmt(d.videoDuration)}` : ""}</small></div>` : ""}
-          <div class="fact" id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></div>
+          <div class="stats">
+          <div class="stat">${tiktokTimeHtml(m.duration || 0, m.duration ? d.videoDuration : 0, false)}</div>
+          <div class="stat" id="full-len"><span class="badge">🎵 Cała piosenka</span><small class="muted">sprawdzam…</small></div>
+          </div>
         </div>
-        ${actionsHtml(ytQuery, canDl ? `<button class="btn primary wide" id="btn-dl">⬇️ Pobierz urywek</button>` : "")}
+        ${actionsHtml(ytQuery, canDl ? `<button class="btn primary" id="btn-dl">⬇️ Pobierz urywek</button>` : "")}
         <div id="file-info"></div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = () => openClipModal(null, current);
@@ -743,11 +745,12 @@ function originalAuthor(title) {
 }
 
 function tiktokTimeHtml(sec, video, est) {
-  const check = `<button class="btn ghost small" id="tt-check">🔄 Dokładnie</button>`;
-  if (sec > 0 && est) return `<span class="badge">⏱ Na TikToku</span><b>~${fmt(sec)}</b> <small class="muted">film</small> ${check}`;
-  if (sec > 0) return `<span class="badge">⏱ Na TikToku</span><b>${fmt(sec)}</b> <small class="muted">cały dźwięk${video ? ` · film ${fmt(video)}` : ""}</small>`;
-  if (grabForDetailsAt) return `<span class="badge">⏱ Na TikToku</span><small class="muted">⏳ sprawdzam…</small>`;
-  return `<span class="badge">⏱ Na TikToku</span><small class="muted">mierzę… (puść film na 2–3 s)</small> <button class="btn ghost small" id="tt-check">🔄 Sprawdź</button>`;
+  const check = `<button class="btn ghost mini" id="tt-check" title="Sprawdź dokładnie">🔄</button>`;
+  const head = (extra = "") => `<span class="badge">⏱ TikTok</span>${extra}`;
+  if (sec > 0 && est) return head(check) + `<b>~${fmt(sec)}</b><small class="muted">film</small>`;
+  if (sec > 0) return head() + `<b>${fmt(sec)}</b><small class="muted">dźwięk${video ? ` · film ${fmt(video)}` : ""}</small>`;
+  if (grabForDetailsAt) return head() + `<small class="muted">⏳ sprawdzam…</small>`;
+  return head(check) + `<small class="muted">mierzę… puść film</small>`;
 }
 window.updateTikTokTime = (sec, video, est) => {
   const el = $("#tt-len");
@@ -809,10 +812,12 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
       <div class="np-sub">♬ ${esc(title)}${orig && !useCap ? " — brak tytułu piosenki" : ""}</div>
       <div class="facts-list">
         ${useCap ? `<div class="fact"><span class="badge">📝 ${esc(ph.from)}</span>${esc(ph.raw || ph.q)}</div>` : ""}
-        <div class="fact" id="tt-len">${tiktokTimeHtml(dur, 0, est)}</div>
-        <div class="fact" id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></div>
+        <div class="stats">
+          <div class="stat" id="tt-len">${tiktokTimeHtml(dur, 0, est)}</div>
+          <div class="stat" id="full-len"><span class="badge">🎵 Cała piosenka</span><small class="muted">sprawdzam…</small></div>
+        </div>
       </div>
-      ${actionsHtml(q, `<button class="btn primary wide" id="np-dl">⬇️ Pobierz urywek</button>`)}
+      ${actionsHtml(q, `<button class="btn primary" id="np-dl">⬇️ Pobierz urywek</button>`)}
     </div>`;
   window.updateTikTokTime(dur, 0, est);
   $("#np-dl").onclick = () => {
@@ -992,8 +997,8 @@ function mineComments(texts) {
 let commentsFor = "";
 function commentsFactHtml(state) {
   return `<span class="badge">💬 Komentarze</span>` + (state === "busy"
-    ? `<small class="muted">⏳ czytam komentarze w TikToku…</small>`
-    : `<small class="muted">${state || "ktoś mógł napisać tytuł"}</small> <button class="btn ghost small" id="cm-btn">💬 Szukaj w komentarzach</button>`);
+    ? `<small class="muted">⏳ czytam…</small>`
+    : `<small class="muted cm-msg">${state || "może ktoś podał tytuł"}</small><button class="btn ghost mini" id="cm-btn">Szukaj</button>`);
 }
 function showCommentsFact(state) {
   let el = $("#cm-fact");
