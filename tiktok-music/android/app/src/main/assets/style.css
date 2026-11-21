@@ -113,3 +113,5 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 #ptr { height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--muted);
   font-size: .9rem; transition: height .25s ease; }
 html, body { overscroll-behavior-y: contain; }
+#yt-q { margin: 6px 0 0; font-size: .82rem; overflow-wrap: anywhere; }
+.btn:disabled { opacity: .45; }

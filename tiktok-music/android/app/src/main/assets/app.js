@@ -207,12 +207,38 @@ function verifiedBest(t) {
   return lastCatalog.find(r => isSameSong(r, t) || (t.artist && isSameSong(r, { title: t.artist, artist: t.title }))) || null;
 }
 
+/** Czyste zapytanie do YouTube: bez emotek, #tagów, @wzmianek i „oryginalny dźwięk”. */
+function cleanQuery(q) {
+  return stripEmoji(q || "")
+    .replace(/#\S+|@\S+/g, " ")
+    .replace(/\b(oryginalny dźwięk|dźwięk oryginalny|original sound|son original|sonido original|som original|wykonawcy|użytkownika)\b/gi, " ")
+    .replace(/\((?:cover|remix|sped up|slowed[^)]*|nightcore|karaoke|tiktok[^)]*)\)/gi, " ")
+    .replace(/\b(cover|sped up|slowed)\b/gi, " ")
+    .replace(/[|•–—\-_:;,"„”“]+/g, " ")
+    .replace(/\s+/g, " ").trim();
+}
+/** Ustawia zapytanie YouTube na karcie; pusty = brak tytułu (przyciski nieaktywne). */
+function setYtQuery(q) {
+  q = cleanQuery(q);
+  const box = $("#video-box");
+  box.querySelectorAll("[data-yt-search]").forEach(b => {
+    b.disabled = !q;
+    if (q) b.dataset.open = ytSearch(q); else delete b.dataset.open;
+  });
+  box.querySelectorAll("[data-ytm]").forEach(b => { b.disabled = !q; b.dataset.ytm = q; });
+  const lab = $("#yt-q");
+  if (lab) lab.innerHTML = q ? `🔎 szuka: <b>${esc(q)}</b>` : `Brak tytułu piosenki — użyj 🎙️ Rozpoznaj (Shazam).`;
+  return q;
+}
+
 /** Czas + przycisk „Pobierz cały” na karcie (Teraz na TikToku / film z linku). */
 async function updateFullUI(target, ytQuery) {
   lastTarget = target;
   lastYt = null;
   const best = verifiedBest(target);
   const t = best ? { title: best.title, artist: best.artist } : target;
+  // najdokładniejsze zapytanie: potwierdzony utwór z katalogu > tytuł z opisu/dźwięku
+  ytQuery = setYtQuery(best ? `${best.artist} ${best.title}` : (t && t.title ? `${t.artist || ""} ${t.title}` : ytQuery));
   const match = t && t.title ? lastFree.find(f => f.url && isSameSong(f, t)) : null;
 
   const btn = $("#np-full");
@@ -252,12 +278,10 @@ async function updateFullUI(target, ytQuery) {
 async function openInYtMusic(btn) {
   const q = btn.dataset.ytm, label = btn.textContent;
   btn.disabled = true; btn.textContent = "⏳ Otwieram YouTube…";
-  let url = ytSearch(q);
-  if (lastYt) url = "https://www.youtube.com/watch?v=" + lastYt.id;
-  else try {
-    const v = JSON.parse(await call("youtubeSearch", q))[0];
-    if (v) url = "https://www.youtube.com/watch?v=" + v.id;
-  } catch {}
+  if (!q) { btn.disabled = false; btn.textContent = label; return; }
+  // tylko film, którego tytuł pasuje do piosenki; inaczej lista wyników (bez zgadywania)
+  if (!lastYt && lastTarget) await findYtMatch(lastTarget, q);
+  const url = lastYt ? "https://www.youtube.com/watch?v=" + lastYt.id : ytSearch(q);
   Android.openUrl(url);
   btn.disabled = false; btn.textContent = label;
 }
@@ -267,7 +291,7 @@ document.addEventListener("click", (e) => {
 });
 
 function fullButtonHtml(q) {
-  return `<p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
+  return `<p class="muted small" id="yt-q"></p><p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
     <small class="muted">Otwiera film w YouTube — pod filmem kliknij „Pobierz” (YouTube Premium).</small></p>
     <p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
     <small class="muted" id="np-full-src"></small></p><div id="np-file"></div>`;
@@ -453,7 +477,7 @@ async function analyze(url) {
           ${m.duration ? `<p><span class="badge">⏱ Na TikToku</span><b>${fmt(m.duration)}</b> <small class="muted">(dźwięk)</small></p>` : ""}
           <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
           <div class="row np-actions">
-            <button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button>
+            <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button>
             ${canDl ? `<button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek</button>` : ""}
           </div>
           <div id="file-info"></div>
@@ -761,7 +785,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   // napisy z TikToka mają pierwszeństwo (hashtagi tylko przy „oryginalnym dźwięku”)
   const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
   const hq = useCap ? ph.q : "";
-  const q = useCap ? ph.q : orig ? (originalAuthor(title) || title) : title.replace(/\s+-\s+/g, " ");
+  const q = useCap ? ph.q : orig ? "" : title.replace(/\s+-\s+/g, " ");
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
@@ -770,7 +794,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
       <p id="tt-len">${tiktokTimeHtml(dur, 0, est)}</p>
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
       <div class="row np-actions">
-        <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
+        <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
         <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
       </div>
       ${fullButtonHtml(q)}
