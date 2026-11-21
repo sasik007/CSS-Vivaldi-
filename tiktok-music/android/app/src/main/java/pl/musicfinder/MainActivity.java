@@ -40,6 +40,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -857,6 +858,22 @@ public class MainActivity extends Activity {
             main.post(() -> {
                 getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE).edit().remove("np_shown").apply();
                 checkNowPlaying();
+            });
+        }
+
+        /** Wraca do TikToka, żeby skopiować link do bieżącego filmu. */
+        @JavascriptInterface
+        public void backToTikTok() {
+            main.post(() -> {
+                String hint = "W TikToku: Udostępnij → Kopiuj link, potem wróć do Music Finder";
+                if (!isInMultiWindowMode()) {
+                    for (String pkg : new String[]{"com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.zhiliaoapp.musically.go"}) {
+                        Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+                        if (i == null) continue;
+                        try { startActivity(i); break; } catch (Exception ignored) { }
+                    }
+                }
+                Toast.makeText(MainActivity.this, hint, Toast.LENGTH_LONG).show();
             });
         }
 

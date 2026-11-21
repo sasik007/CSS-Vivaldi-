@@ -275,6 +275,7 @@ document.addEventListener("play", (e) => {  // tylko jeden odsłuch naraz
 
 // --- TikTok
 let current = null;
+let autoDownloadAt = 0;
 
 function isOriginal(m) {
   const t = (m.title || "").toLowerCase();
@@ -301,11 +302,17 @@ async function analyze(url) {
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
           ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
           <div id="file-info"></div>
-          ${src.youtube ? `<p>${ytButton(ytQuery, orig ? "▶ Szukaj w YouTube" : undefined)}</p>` : ""}
+          <p>${ytButton(ytQuery, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
+          <p><button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button></p>
           ${canDl ? `<p><button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek z TikToka</button></p>` : ""}
         </div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = downloadCurrent;
+    // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
+    if (canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000) {
+      autoDownloadAt = 0;
+      downloadCurrent();
+    }
 
     if (orig) {
       setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
@@ -386,8 +393,17 @@ window.handleNowPlaying = async (title) => {
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
-      ${src.youtube ? `<p>${ytButton(q)}</p>` : ""}
+      <p>${ytButton(orig ? title : q, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
+      <div class="row np-actions">
+        <button class="btn ghost" data-open="${esc(ytSearch(orig ? title : q))}">🔎 Szukaj w YouTube</button>
+        <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
+      </div>
     </div></div>`;
+  $("#np-dl").onclick = () => {
+    autoDownloadAt = Date.now();
+    setStatus("👉 W TikToku: Udostępnij → Kopiuj link, potem wróć tutaj — pobieranie ruszy samo.");
+    Android.backToTikTok();
+  };
   if (orig) return setStatus("To „oryginalny dźwięk” — spróbuj 🎙️ Rozpoznaj albo udostępnij film do aplikacji.", true);
   await searchAll(q, title);
 };

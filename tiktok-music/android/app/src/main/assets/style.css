@@ -91,3 +91,6 @@ h2.sec small { color: var(--muted); font-weight: 400; }
 .tracks small { color: var(--muted); }
 #diag { white-space: pre-wrap; font-size: .75rem; background: #000; border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: 50vh; overflow: auto; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+.np-actions .btn { flex: 1; text-align: center; }
+#video-box:not(:empty) { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+#video-box .video { margin-top: 0; }
