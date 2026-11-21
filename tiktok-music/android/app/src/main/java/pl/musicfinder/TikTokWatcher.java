@@ -55,6 +55,140 @@ public class TikTokWatcher extends AccessibilityService {
     private static final Pattern COPY_RE = Pattern.compile("^(kopiuj link|skopiuj link|copy link)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final Handler h = new Handler(Looper.getMainLooper());
     private int grabStep = 0;
+
+    // ---------------------------------------------------------- czytanie komentarzy
+    static final String KEY_COMMENTS = "cm_texts";
+    private static final Pattern COMMENT_RE = Pattern.compile(
+            "(komentarz|comment|comentario|coment[aá]rio|kommentar|commentaire|commento)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern ADD_COMMENT_RE = Pattern.compile(
+            "(dodaj|add|añadir|adicionar|hinzuf|ajouter|aggiungi|napisz|write)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private int cmStep = 0;
+    private long cmDeadline = 0;
+    private boolean cmOpened = false;
+    private final java.util.LinkedHashSet<String> cmTexts = new java.util.LinkedHashSet<>();
+
+    /** Otwiera komentarze bieżącego filmu, odczytuje je i zamyka. false = usługa wyłączona. */
+    static boolean requestComments(boolean tiktokVisible) {
+        TikTokWatcher w = instance;
+        if (w == null) return false;
+        w.h.post(() -> {
+            w.h.removeCallbacks(w.cmTick);
+            w.cmStep = 1;
+            w.cmOpened = false;
+            w.cmTexts.clear();
+            w.cmDeadline = System.currentTimeMillis() + 9000;
+            w.h.postDelayed(w.cmTick, tiktokVisible ? 50 : 800);
+        });
+        return true;
+    }
+
+    private final Runnable cmTick = new Runnable() {
+        @Override
+        public void run() {
+            if (cmStep == 0) return;
+            if (System.currentTimeMillis() > cmDeadline) { finishComments(); return; }
+            if (cmStep == 1) {
+                if (clickComments()) { cmOpened = true; cmStep = 2; h.postDelayed(this, 1500); }
+                else h.postDelayed(this, 250);
+            } else if (cmStep == 2) {
+                collectTexts();
+                scrollComments();
+                cmStep = 3;
+                h.postDelayed(this, 1000);
+            } else if (cmStep == 3) {
+                collectTexts();
+                finishComments();
+            }
+        }
+    };
+
+    private void finishComments() {
+        cmStep = 0;
+        if (cmOpened) performGlobalAction(GLOBAL_ACTION_BACK);  // zamknij panel komentarzy
+        JSONArray arr = new JSONArray();
+        for (String t : cmTexts) arr.put(t);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_COMMENTS, arr.toString()).apply();
+        Intent i = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                .putExtra(MainActivity.EXTRA_COMMENTS, cmOpened);
+        try { startActivity(i); } catch (Exception ignored) { }
+    }
+
+    /** Przycisk komentarzy na prawym pasku (nie pole „Dodaj komentarz”). */
+    private boolean clickComments() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r == null || !isTikTok(r.getPackageName())) continue;
+                Rect wb = new Rect();
+                w.getBoundsInScreen(wb);
+                AccessibilityNodeInfo n = findComment(r, wb, 0);
+                while (n != null && !n.isClickable()) n = n.getParent();
+                if (n != null && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    private AccessibilityNodeInfo findComment(AccessibilityNodeInfo n, Rect wb, int depth) {
+        if (n == null || depth > 60) return null;
+        if (n.isVisibleToUser()) {
+            Rect b = new Rect();
+            n.getBoundsInScreen(b);
+            CharSequence d = n.getContentDescription() != null ? n.getContentDescription() : n.getText();
+            if (d != null && b.width() > 0 && wb.contains(b.centerX(), b.centerY())
+                    && b.centerX() > wb.left + wb.width() * 0.6          // prawy pasek przycisków
+                    && COMMENT_RE.matcher(d).find() && !ADD_COMMENT_RE.matcher(d).find()) return n;
+        }
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo f = findComment(n.getChild(i), wb, depth + 1);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    private void collectTexts() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && isTikTok(r.getPackageName())) collectFrom(r, 0);
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private void collectFrom(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 70 || cmTexts.size() >= 200) return;
+        if (n.isVisibleToUser()) {
+            for (CharSequence cs : new CharSequence[]{n.getText(), n.getContentDescription()}) {
+                if (cs == null) continue;
+                String t = cs.toString().trim();
+                if (t.length() >= 3 && t.length() <= 220) cmTexts.add(t);
+            }
+        }
+        for (int i = 0; i < n.getChildCount(); i++) collectFrom(n.getChild(i), depth + 1);
+    }
+
+    /** Przewija listę komentarzy raz w dół, żeby zobaczyć więcej. */
+    private void scrollComments() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r == null || !isTikTok(r.getPackageName())) continue;
+                AccessibilityNodeInfo sc = findScrollable(r, 0);
+                if (sc != null) { sc.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD); return; }
+            }
+        } catch (Exception ignored) { }
+    }
+
+    private AccessibilityNodeInfo findScrollable(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 60) return null;
+        // najgłębsza przewijalna lista (panel komentarzy), nie cały feed
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo f = findScrollable(n.getChild(i), depth + 1);
+            if (f != null) return f;
+        }
+        return n.isScrollable() && n.isVisibleToUser() ? n : null;
+    }
     private long grabDeadline = 0;
 
     @Override

@@ -98,6 +98,7 @@ public class MainActivity extends Activity {
 
     static final String SHORTCUT_ID = "find_song";
     static final String EXTRA_GRAB = "grab_result";
+    static final String EXTRA_COMMENTS = "comments_result";
     /** Interfejs ładujemy z wirtualnego adresu https (potrzebne, by działał odtwarzacz YouTube). */
     static final String APP_HOST = "appassets.musicfinder.local";
     static final Pattern YT_LENGTH = Pattern.compile("\"lengthText\":\\{.{0,300}?\"simpleText\":\"([\\d:]+)\"");
@@ -229,6 +230,13 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent.hasExtra(EXTRA_COMMENTS)) {
+            // powrót po odczytaniu komentarzy w TikToku
+            boolean ok = intent.getBooleanExtra(EXTRA_COMMENTS, false);
+            String json = getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE).getString(TikTokWatcher.KEY_COMMENTS, "[]");
+            ui.evaluateJavascript("window.handleComments && window.handleComments(" + json + "," + ok + ")", null);
+            return;
+        }
         if (intent.hasExtra(EXTRA_GRAB)) {
             // powrót po automatycznym „Kopiuj link” w TikToku
             boolean ok = intent.getBooleanExtra(EXTRA_GRAB, false);
@@ -1080,6 +1088,21 @@ public class MainActivity extends Activity {
                 }
             });
             return TikTokWatcher.requestCopyLink(isInMultiWindowMode());
+        }
+
+        /** Otwiera komentarze bieżącego filmu w TikToku, czyta je i wraca. false = usługa wyłączona. */
+        @JavascriptInterface
+        public boolean readComments() {
+            if (!watcherEnabled()) return false;
+            boolean multi = isInMultiWindowMode();
+            if (!multi) main.post(() -> {
+                for (String pkg : new String[]{"com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.zhiliaoapp.musically.go"}) {
+                    Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+                    if (i == null) continue;
+                    try { startActivity(i); break; } catch (Exception ignored) { }
+                }
+            });
+            return TikTokWatcher.requestComments(multi);
         }
 
         /** Wraca do TikToka, żeby skopiować link do bieżącego filmu. */
