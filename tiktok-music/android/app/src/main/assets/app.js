@@ -173,7 +173,78 @@ async function downloadFull(btn) {
   }
 }
 
-let lastCatalog = [];
+let lastCatalog = [], lastFree = [];
+
+// Czy darmowy utwór to naprawdę ta piosenka (a nie coś o podobnej nazwie)?
+function norm(s) {
+  return (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\(.*?\)|\[.*?\]/g, " ").replace(/\b(feat|ft)\..*$/, " ").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+function isSameSong(f, t) {
+  const ft = norm(f.title), tt = norm(t.title);
+  if (!ft || !tt || !(ft === tt || ft.startsWith(tt + " ") || tt.startsWith(ft + " "))) return false;
+  if (!t.artist) return true;
+  const fa = norm(f.artist), ta = norm(t.artist);
+  return !!fa && (fa.includes(ta) || ta.includes(fa) || ta.split(" ").some(w => w.length > 2 && fa.split(" ").includes(w)));
+}
+
+/** Czas + przycisk „Pobierz cały” na karcie (Teraz na TikToku / film z linku). */
+async function updateFullUI(target, ytQuery) {
+  const best = lastCatalog[0];
+  const t = best ? { title: best.title, artist: best.artist } : target;
+  const match = t && t.title ? lastFree.find(f => f.url && isSameSong(f, t)) : null;
+
+  const btn = $("#np-full");
+  if (btn) {
+    if (match) {
+      btn.disabled = false;
+      btn.textContent = `⬇️ Pobierz cały utwór · ${match.format || ""}`;
+      btn.title = `${match.source} · ${match.license}`;
+      btn.onclick = () => downloadFullTo(btn, match.url, `${match.artist ? match.artist + " - " : ""}${match.title}`);
+      $("#np-full-src").textContent = `Legalne źródło: ${match.source} · ${match.license}`;
+    } else {
+      btn.disabled = true;
+      btn.textContent = "⬇️ Pobierz cały";
+      $("#np-full-src").textContent = (src.openverse || src.archive)
+        ? "Nie znaleziono tej piosenki w legalnych, darmowych źródłach."
+        : "Włącz Openverse w ⚙️ Źródłach, żeby szukać całych utworów.";
+    }
+  }
+
+  const el = $("#full-len");
+  if (!el) return;
+  const song = best || match;
+  if (song && song.duration) {
+    el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">(${esc(song.artist || "")} — ${esc(song.title)})</small>`;
+    return;
+  }
+  // brak w katalogu → przybliżony czas z pierwszego wyniku YouTube
+  el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">sprawdzam na YouTube…</small>`;
+  try {
+    const v = JSON.parse(await call("youtubeSearch", ytQuery)).find(x => x.length);
+    el.innerHTML = v
+      ? `<span class="badge">⏱ Czas</span><b>~${esc(v.length)}</b> <small class="muted">(wg YouTube: ${esc(v.title)})</small>`
+      : `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`;
+  } catch { el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`; }
+}
+
+function fullButtonHtml() {
+  return `<p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
+    <small class="muted" id="np-full-src"></small></p><div id="np-file"></div>`;
+}
+
+async function downloadFullTo(btn, url, name) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ Pobieram…";
+  try {
+    const i = JSON.parse(await callP(l => btn.textContent = "⏳ " + l, "downloadFile", url, safeName(name)));
+    btn.textContent = "✅ Zapisano cały utwór";
+    $("#np-file").innerHTML = fileInfoHtml(i);
+  } catch (err) {
+    btn.disabled = false; btn.textContent = label;
+    setStatus("❌ " + err.message, true);
+  }
+}
 /** Długość całej piosenki na karcie „Teraz na TikToku” / filmu z linku. */
 function showFullLength(song) {
   const el = $("#full-len");
@@ -194,13 +265,13 @@ async function searchAll(q, title = q, fallback = "") {
     if (!r.length && fallback) r = await searchSongs(fallback);
     renderResults(r);
     lastCatalog = r;
-    showFullLength(r[0]);
     return r.length;
   })().catch(() => 0);
   const freeJobs = [];
   if (src.openverse) freeJobs.push(searchOpenverse(fallback || q).catch(() => []));
   if (src.archive) freeJobs.push(searchArchive(fallback || q).catch(() => []));
-  const free = Promise.all(freeJobs).then(l => { const all = l.flat(); renderFree(all); return all.length; });
+  lastFree = [];
+  const free = Promise.all(freeJobs).then(l => { const all = l.flat(); lastFree = all; renderFree(all); return all.length; });
   const [n, f] = await Promise.all([catalog, free]);
   const parts = [];
   if (src.itunes) parts.push(`${n} w katalogu`);
@@ -223,7 +294,7 @@ function storeLinks(s) {
 function renderResults(list) {
   resultsEl.innerHTML = "";
   list.forEach((s, i) => {
-    const links = (src.youtube ? `<button class="btn yt small" data-play="${esc(`${s.artist} ${s.title}`)}">▶ Odtwórz</button>` : "") +
+    const links =
       storeLinks(s).map(([n, u]) => `<button class="btn ghost small" data-open="${esc(u)}">${n}</button>`).join("");
     resultsEl.insertAdjacentHTML("beforeend", `
       <article class="song ${i === 0 ? "best" : ""}">
@@ -329,7 +400,7 @@ async function analyze(url) {
     const m = d.music || {}, orig = isOriginal(m);
     const canDl = !!(m.playUrl || d.videoUrl);
     // dla „oryginalnego dźwięku” szukamy po opisie filmu (często jest tam tytuł piosenki)
-    const ytQuery = orig ? (d.desc || "").replace(/#\S+/g, "").trim() + " song" : `${m.author || ""} ${m.title}`;
+    const ytQuery = orig ? (hintQuery(d.desc) || (d.desc || "").replace(/#\S+/g, "").trim() || m.author || m.title) : `${m.author || ""} ${m.title}`;
     $("#video-box").innerHTML = `
       <div class="video">
         ${m.cover || d.cover ? `<img src="${esc(m.cover || d.cover)}" alt="">` : ""}
@@ -337,11 +408,13 @@ async function analyze(url) {
           <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
           ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
-          <p id="full-len"></p>
+          <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
+          <div class="row np-actions">
+            <button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button>
+            ${canDl ? `<button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek</button>` : ""}
+          </div>
           <div id="file-info"></div>
-          <p>${ytButton(ytQuery, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
-          <p><button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button></p>
-          ${canDl ? `<p><button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek z TikToka</button></p>` : ""}
+          ${fullButtonHtml()}
         </div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = downloadCurrent;
@@ -357,6 +430,7 @@ async function analyze(url) {
     } else {
       await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
     }
+    await updateFullUI(orig ? { title: current.hint || "" } : { title: m.title, artist: m.author }, ytQuery);
     // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
     if (autoDl) downloadCurrent();
   } catch (err) {
@@ -431,7 +505,7 @@ $("#form-search").onsubmit = async (e) => {
 $("#btn-yt").onclick = () => {
   const q = $("#q").value.trim();
   if (!q) return $("#q").focus();
-  playYouTube(q);
+  Android.openUrl(ytSearch(q));
 };
 
 // --- „Teraz na TikToku” (z usługi wykrywania)
@@ -458,11 +532,11 @@ window.handleNowPlaying = async (title, hint = "") => {
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
       ${orig ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.${hq ? ` Szukam po opisie filmu: <b>${esc(hq)}</b>` : ""}</p>` : ""}
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
-      <p>${ytButton(q, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
       <div class="row np-actions">
         <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
         <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
       </div>
+      ${fullButtonHtml()}
     </div></div>`;
   $("#np-dl").onclick = () => {
     autoDownloadAt = Date.now();
@@ -476,11 +550,13 @@ window.handleNowPlaying = async (title, hint = "") => {
     }
   };
   if (orig && !hq) {
-    showFullLength(null);
-    return setStatus("To „oryginalny dźwięk” bez tytułu — spróbuj 🎙️ Rozpoznaj (Shazam) albo ▶ Odtwórz z YouTube.", true);
+    lastCatalog = []; lastFree = [];
+    setStatus("To „oryginalny dźwięk” bez tytułu — spróbuj 🎙️ Rozpoznaj (Shazam) albo 🔎 Szukaj w YouTube.", true);
+    return updateFullUI(null, q);
   }
   await searchAll(q, title);
-  if (!lastCatalog.length) showFullLength(null);
+  const parts = title.split(/\s+-\s+/);
+  await updateFullUI(orig ? { title: hq } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
 };
 
 // --- baner włączenia wykrywania
