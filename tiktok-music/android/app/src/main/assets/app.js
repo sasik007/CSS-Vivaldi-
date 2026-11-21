@@ -288,6 +288,11 @@ document.addEventListener("play", (e) => {  // tylko jeden odsłuch naraz
 
 // --- TikTok
 let current = null;
+window.grabFailed = () => {
+  const btn = $("#np-dl");
+  if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
+  setStatus("Nie udało się automatycznie skopiować linku. W TikToku: Udostępnij → Kopiuj link i wróć — pobierze się samo.", true);
+};
 let autoDownloadAt = 0;
 
 function isOriginal(m) {
@@ -430,8 +435,14 @@ window.handleNowPlaying = async (title, hint = "") => {
     </div></div>`;
   $("#np-dl").onclick = () => {
     autoDownloadAt = Date.now();
-    setStatus("👉 W TikToku: Udostępnij → Kopiuj link, potem wróć tutaj — pobieranie ruszy samo.");
-    Android.backToTikTok();
+    const btn = $("#np-dl");
+    btn.disabled = true; btn.textContent = "⏳ Pobieram link z TikToka…";
+    setStatus("⏳ Kopiuję link do filmu w TikToku — za chwilę wrócę i pobiorę.");
+    if (!Android.grabTikTokLink()) {
+      btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek";
+      setStatus("👉 W TikToku: Udostępnij → Kopiuj link, potem wróć tutaj — pobieranie ruszy samo.");
+      Android.backToTikTok();
+    }
   };
   if (orig && !hq) {
     showFullLength(null);

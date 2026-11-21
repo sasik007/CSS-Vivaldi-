@@ -97,6 +97,7 @@ public class MainActivity extends Activity {
             + "}catch(e){return null;}})()";
 
     static final String SHORTCUT_ID = "find_song";
+    static final String EXTRA_GRAB = "grab_result";
     /** Interfejs ładujemy z wirtualnego adresu https (potrzebne, by działał odtwarzacz YouTube). */
     static final String APP_HOST = "appassets.musicfinder.local";
     static final Pattern YT_LENGTH = Pattern.compile("\"lengthText\":\\{.{0,300}?\"simpleText\":\"([\\d:]+)\"");
@@ -228,6 +229,14 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (intent.hasExtra(EXTRA_GRAB)) {
+            // powrót po automatycznym „Kopiuj link” w TikToku
+            boolean ok = intent.getBooleanExtra(EXTRA_GRAB, false);
+            if (!ok) ui.evaluateJavascript("window.grabFailed && window.grabFailed()", null);
+            main.postDelayed(this::checkClipboard, 400);
+            main.postDelayed(this::checkClipboard, 1200);
+            return;
+        }
         handleIntent(intent);
     }
 
@@ -875,6 +884,24 @@ public class MainActivity extends Activity {
                 getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE).edit().remove("np_shown").apply();
                 checkNowPlaying();
             });
+        }
+
+        /** Automatycznie: TikTok → Udostępnij → Kopiuj link → powrót. false = usługa wyłączona. */
+        @JavascriptInterface
+        public boolean grabTikTokLink() {
+            if (!watcherEnabled()) return false;
+            // ten sam link mógł już być wyszukany — pozwól go użyć ponownie
+            getSharedPreferences("mf", MODE_PRIVATE).edit().remove("last").apply();
+            main.post(() -> {
+                if (!isInMultiWindowMode()) {
+                    for (String pkg : new String[]{"com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.zhiliaoapp.musically.go"}) {
+                        Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+                        if (i == null) continue;
+                        try { startActivity(i); break; } catch (Exception ignored) { }
+                    }
+                }
+            });
+            return TikTokWatcher.requestCopyLink();
         }
 
         /** Wraca do TikToka, żeby skopiować link do bieżącego filmu. */

@@ -1,7 +1,10 @@
 package pl.musicfinder;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Rect;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -40,6 +43,101 @@ public class TikTokWatcher extends AccessibilityService {
     private static final String NOTES = "♬♫♪♩🎵🎶";
 
     private long lastScan = 0;
+
+    // ---------------------------------------------------------- automatyczne „Udostępnij → Kopiuj link”
+    private static TikTokWatcher instance;
+    private static final Pattern SHARE_RE = Pattern.compile("^(udostępnij|share|podziel się)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern COPY_RE = Pattern.compile("^(kopiuj link|skopiuj link|copy link)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private int grabStep = 0;
+    private long grabDeadline = 0;
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        instance = this;
+    }
+
+    @Override
+    public void onDestroy() {
+        instance = null;
+        h.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
+
+    /** Prosi usługę o skopiowanie linku do bieżącego filmu w TikToku. false = usługa wyłączona. */
+    static boolean requestCopyLink() {
+        TikTokWatcher w = instance;
+        if (w == null) return false;
+        w.h.post(w::startGrab);
+        return true;
+    }
+
+    private void startGrab() {
+        h.removeCallbacks(grabTick);
+        grabStep = 1;
+        grabDeadline = System.currentTimeMillis() + 9000;
+        h.postDelayed(grabTick, 900);  // czas na przełączenie do TikToka
+    }
+
+    private final Runnable grabTick = new Runnable() {
+        @Override
+        public void run() {
+            if (grabStep == 0) return;
+            if (System.currentTimeMillis() > grabDeadline) { finishGrab(false); return; }
+            if (grabStep == 1) {
+                if (clickFirst(SHARE_RE)) { grabStep = 2; h.postDelayed(this, 700); }
+                else h.postDelayed(this, 400);
+            } else if (grabStep == 2) {
+                if (clickFirst(COPY_RE)) { grabStep = 3; h.postDelayed(() -> finishGrab(true), 600); }
+                else h.postDelayed(this, 300);
+            }
+        }
+    };
+
+    private void finishGrab(boolean ok) {
+        if (!ok && grabStep == 2) performGlobalAction(GLOBAL_ACTION_BACK);  // zamknij otwarty panel udostępniania
+        grabStep = 0;
+        Intent i = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                .putExtra(MainActivity.EXTRA_GRAB, ok);
+        try { startActivity(i); } catch (Exception ignored) { }
+    }
+
+    /** Klika pierwszy widoczny element TikToka, którego tekst/opis pasuje do wzorca. */
+    private boolean clickFirst(Pattern p) {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r == null || !isTikTok(r.getPackageName())) continue;
+                Rect wb = new Rect();
+                w.getBoundsInScreen(wb);
+                AccessibilityNodeInfo n = find(r, p, wb, 0);
+                while (n != null && !n.isClickable()) n = n.getParent();
+                if (n != null && n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    private AccessibilityNodeInfo find(AccessibilityNodeInfo n, Pattern p, Rect wb, int depth) {
+        if (n == null || depth > 60) return null;
+        if (n.isVisibleToUser()) {
+            Rect b = new Rect();
+            n.getBoundsInScreen(b);
+            if (b.width() > 0 && wb.contains(b.centerX(), b.centerY())
+                    && (matches(n.getText(), p) || matches(n.getContentDescription(), p))) return n;
+        }
+        for (int i = 0; i < n.getChildCount(); i++) {
+            AccessibilityNodeInfo f = find(n.getChild(i), p, wb, depth + 1);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    private static boolean matches(CharSequence cs, Pattern p) {
+        return cs != null && p.matcher(cs.toString().trim()).find();
+    }
     private String best;
     private int bestScore;
     private int nodeCount;
