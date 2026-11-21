@@ -422,7 +422,7 @@ window.grabFailed = () => {
   if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
   setStatus("Nie udało się automatycznie skopiować linku. W TikToku: Udostępnij → Kopiuj link i wróć — pobierze się samo.", true);
 };
-let autoDownloadAt = 0;
+let autoDownloadAt = 0, grabForModalAt = 0;
 
 function isOriginal(m) {
   const t = (m.title || "").toLowerCase();
@@ -457,7 +457,7 @@ async function analyze(url) {
           ${fullButtonHtml(ytQuery)}
         </div>
       </div>`;
-    if (canDl) $("#btn-dl").onclick = downloadCurrent;
+    if (canDl) $("#btn-dl").onclick = () => openClipModal(null, current);
     const autoDl = canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000;
     if (autoDl) autoDownloadAt = 0;
 
@@ -537,8 +537,94 @@ $("#btn-paste").onclick = () => {
 // wywoływane z Javy, gdy ktoś udostępni film z TikToka do aplikacji
 window.handleShared = (text) => {
   const m = (text || "").match(TT_RE);
-  if (m) analyze(m[0]); else setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
+  if (!m) return setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
+  // link skopiowany po „Pobierz urywek” z karty → okienko z danymi, karta zostaje bez zmian
+  if (grabForModalAt && Date.now() - grabForModalAt < 5 * 60_000) {
+    grabForModalAt = 0;
+    const btn = $("#np-dl");
+    if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
+    setStatus("");
+    return openClipModal(m[0]);
+  }
+  analyze(m[0]);
 };
+
+// --- okienko: dane kawałka z TikToka → Pobierz / Anuluj → powrót
+function closeModal() { $("#modal").hidden = true; $("#sheet").innerHTML = ""; }
+window.onBack = () => { if (!$("#modal").hidden) { closeModal(); return true; } return false; };
+$("#modal").onclick = (e) => { if (e.target.id === "modal") closeModal(); };
+
+async function openClipModal(url, data) {
+  const sheet = $("#sheet");
+  $("#modal").hidden = false;
+  sheet.innerHTML = `<p>⏳ Wczytuję dane z TikToka…</p><div class="row"><button class="btn ghost" id="m-cancel">Anuluj</button></div>`;
+  $("#m-cancel").onclick = closeModal;
+  let d = data;
+  try { if (!d) d = JSON.parse(await call("tiktok", url)); }
+  catch (err) {
+    sheet.innerHTML = `<p class="err">❌ ${esc(err.message)}</p><div class="row"><button class="btn ghost" id="m-cancel">Zamknij</button></div>`;
+    $("#m-cancel").onclick = closeModal;
+    return;
+  }
+  if ($("#modal").hidden) return;  // anulowano w międzyczasie
+  current = d;
+  if (!d.hintTag) { const ph = parseHint(d.desc); if (ph.q && (isOriginal(d.music || {}) || ph.from !== "Z hashtagów")) d.hintTag = ph; }
+  const m = d.music || {};
+  const tag = songTag(d);
+  const name = safeName(`${tag.artist ? tag.artist + " - " : ""}${tag.title}`);
+  if (m.duration) window.updateTikTokTime(m.duration);  // uzupełnij czas na karcie
+
+  sheet.innerHTML = `
+    <div class="top">
+      ${m.cover || d.cover ? `<img src="${esc(m.cover || d.cover)}" alt="" onerror="this.remove()">` : ""}
+      <div><h3>${esc(tag.title || "?")}</h3><div class="meta">${esc(tag.artist || "")}</div></div>
+    </div>
+    <dl class="facts">
+      <dt>🎵 Dźwięk</dt><dd>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</dd>
+      ${m.duration ? `<dt>⏱ Cały dźwięk</dt><dd><b>${fmt(m.duration)}</b> (na TikToku)</dd>` : ""}
+      ${d.videoDuration ? `<dt>🎬 Film</dt><dd>${fmt(d.videoDuration)}</dd>` : ""}
+      <dt>👤 Autor filmu</dt><dd>@${esc(d.author || "")}</dd>
+      <dt>📶 Jakość</dt><dd id="m-q"><small class="muted">sprawdzam…</small></dd>
+      <dt>📁 Plik</dt><dd>Pobrane/Music Finder/${esc(name)}</dd>
+    </dl>
+    <div id="m-info"></div>
+    <div class="row m-actions">
+      <button class="btn" id="m-dl" ${m.playUrl || d.videoUrl ? "" : "disabled"}>⬇️ Pobierz</button>
+      <button class="btn ghost" id="m-cancel">Anuluj</button>
+    </div>`;
+  $("#m-cancel").onclick = closeModal;
+  $("#m-dl").onclick = () => modalDownload(d, name, tag);
+
+  // szacowana jakość przed pobraniem (rozmiar / czas)
+  if (m.playUrl) {
+    try {
+      const p = JSON.parse(await call("probe", m.playUrl));
+      const fmtName = /mpeg|mp3/i.test(p.type || "") ? "MP3" : /mp4|m4a|aac/i.test(p.type || "") ? "AAC" : (p.type || "audio");
+      const kbps = p.size > 0 && m.duration ? Math.round(p.size * 8 / m.duration / 1000) : 0;
+      if ($("#m-q")) $("#m-q").innerHTML = `${fmtName}${kbps ? ` · ~${kbps} kbps` : ""}${p.size > 0 ? ` · ${fmtSize(p.size)}` : ""}
+        <br><small class="muted">Aplikacja porówna też ścieżkę z filmu i zapisze całość w najlepszej jakości.</small>`;
+    } catch { if ($("#m-q")) $("#m-q").textContent = "najlepsza dostępna (wybór automatyczny)"; }
+  } else if ($("#m-q")) $("#m-q").textContent = "ścieżka dźwiękowa z filmu (AAC)";
+}
+
+async function modalDownload(d, name, tag) {
+  const m = d.music || {}, btn = $("#m-dl");
+  btn.disabled = true; $("#m-cancel").textContent = "Zamknij";
+  btn.textContent = "⏳ Pobieram…";
+  try {
+    const i = JSON.parse(await callP(l => { if ($("#m-dl")) $("#m-dl").textContent = "⏳ " + l; },
+      "download", m.playUrl || "", d.videoUrl || "", name, tag.title, tag.artist));
+    if (!$("#m-dl")) return;
+    btn.textContent = "✅ Zapisano";
+    $("#m-info").innerHTML = fileInfoHtml(i);
+    setStatus(`✅ Zapisano: ${i.path || name}`);
+    setTimeout(closeModal, 2500);  // powrót do poprzedniego ekranu
+  } catch (err) {
+    if (!$("#m-dl")) return;
+    btn.disabled = false; btn.textContent = "⬇️ Spróbuj ponownie";
+    $("#m-info").innerHTML = `<p class="err">❌ ${esc(err.message)}</p>`;
+  }
+}
 
 $("#form-search").onsubmit = async (e) => {
   e.preventDefault();
@@ -633,7 +719,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0) => {
       ${fullButtonHtml(q)}
     </div></div>`;
   $("#np-dl").onclick = () => {
-    autoDownloadAt = Date.now();
+    grabForModalAt = Date.now();
     const btn = $("#np-dl");
     btn.disabled = true; btn.textContent = "⏳ Pobieram link z TikToka…";
     setStatus("⏳ Kopiuję link do filmu w TikToku — za chwilę wrócę i pobiorę.");

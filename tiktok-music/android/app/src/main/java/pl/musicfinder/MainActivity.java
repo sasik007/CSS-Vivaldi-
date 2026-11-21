@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
             + "if(!it){if(location.pathname.indexOf('/login')===0)return JSON.stringify({status:-3});return null;}"
             + "var m=it.music||{},v=it.video||{};var pa=v.playAddr;if(Array.isArray(pa))pa=(pa[0]||{}).src;"
             + "return JSON.stringify({status:0,id:it.id,desc:it.desc,author:(it.author||{}).uniqueId,"
-            + " cover:v.cover||v.originCover,videoUrl:pa||v.downloadAddr||'',page:location.href,"
+            + " cover:v.cover||v.originCover,videoUrl:pa||v.downloadAddr||'',videoDuration:v.duration||0,page:location.href,"
             + " music:{title:m.title,author:m.authorName,album:m.album,original:!!m.original,playUrl:m.playUrl||'',"
             + "  cover:m.coverLarge||m.coverMedium||m.coverThumb,duration:m.duration}});"
             + "}catch(e){return null;}})()";
@@ -504,10 +504,16 @@ public class MainActivity extends Activity {
         File out;
         if (a != null && v != null) {
             job.stage("Wybieram lepszą jakość…");
-            long ka = mediaInfo(a, isMp3(a) ? "mp3" : "m4a").optLong("kbps", 0);
-            long kv = mediaInfo(v, "m4a").optLong("kbps", 0);
-            // przy remisie (±8 kbps) AAC z filmu brzmi lepiej niż MP3 o tym samym bitrate
-            boolean useVideo = isMp3(a) ? kv + 8 >= ka : kv > ka;
+            JSONObject ia = mediaInfo(a, isMp3(a) ? "mp3" : "m4a"), iv = mediaInfo(v, "m4a");
+            long ka = ia.optLong("kbps", 0), kv = iv.optLong("kbps", 0);
+            double da = ia.optDouble("duration", 0), dv = iv.optDouble("duration", 0);
+            boolean useVideo;
+            if (Math.abs(da - dv) > 1.5) {
+                useVideo = dv > da;  // najpierw całość: dłuższa wersja dźwięku
+            } else {
+                // ta sama długość → lepsza jakość; przy remisie (±8 kbps) AAC brzmi lepiej niż MP3
+                useVideo = isMp3(a) ? kv + 8 >= ka : kv > ka;
+            }
             out = useVideo ? v : a;
             (useVideo ? a : v).delete();
         } else {
@@ -874,6 +880,31 @@ public class MainActivity extends Activity {
             }).start();
         }
 
+        /** Rozmiar i typ pliku przed pobraniem: {size, type}. */
+        @JavascriptInterface
+        public void probe(int id, String url) {
+            new Thread(() -> {
+                JSONObject o = new JSONObject();
+                try {
+                    HttpURLConnection c = open(url, "https://www.tiktok.com/");
+                    c.setRequestMethod("HEAD");
+                    long size = c.getResponseCode() < 400 ? c.getContentLengthLong() : -1;
+                    String type = c.getContentType();
+                    c.disconnect();
+                    if (size <= 0) {  // nie każdy serwer obsługuje HEAD
+                        c = open(url, "https://www.tiktok.com/");
+                        c.setRequestProperty("Range", "bytes=0-0");
+                        String cr = c.getHeaderField("Content-Range");
+                        if (cr != null && cr.contains("/")) size = Long.parseLong(cr.substring(cr.lastIndexOf('/') + 1).trim());
+                        if (type == null) type = c.getContentType();
+                        c.disconnect();
+                    }
+                    o.put("size", size).put("type", type == null ? "" : type);
+                } catch (Exception ignored) { }
+                reply(id, true, o.toString());
+            }).start();
+        }
+
         @JavascriptInterface
         public String clipboard() {
             ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -1032,8 +1063,11 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (ui.canGoBack()) ui.goBack();
-        else super.onBackPressed();
+        ui.evaluateJavascript("window.onBack ? window.onBack() : false", r -> {
+            if ("true".equals(r)) return;  // zamknięto okienko w aplikacji
+            if (ui.canGoBack()) ui.goBack();
+            else MainActivity.super.onBackPressed();
+        });
     }
 
     @Override

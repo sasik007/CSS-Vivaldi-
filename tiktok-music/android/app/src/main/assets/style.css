@@ -100,3 +100,13 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 #np-full-src { display: block; margin-top: 4px; }
 .btn.ytm { width: 100%; text-align: center; background: #ff0033; margin-top: 8px; }
 .btn.ytm + small { display: block; margin-top: 4px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex; align-items: flex-end; justify-content: center; z-index: 50; }
+.modal[hidden] { display: none !important; }
+.sheet { background: var(--card); border: 1px solid var(--line); border-radius: 18px 18px 0 0; width: 100%; max-width: 560px;
+  max-height: 88vh; overflow: auto; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
+.sheet .top { display: flex; gap: 12px; align-items: center; }
+.sheet .top img { width: 72px; height: 72px; border-radius: 10px; object-fit: cover; }
+.sheet h3 { margin: 0; font-size: 1.1rem; }
+.sheet .meta { color: var(--muted); }
+.m-actions .btn { flex: 1; text-align: center; padding: 14px; font-size: 1rem; }
+.err { color: #ff6b81; }
