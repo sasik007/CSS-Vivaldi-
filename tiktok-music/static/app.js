@@ -44,7 +44,7 @@ async function api(url, opts) {
 // --- link TikTok
 $("#form-link").onsubmit = async (e) => {
   e.preventDefault();
-  const url = $("#tt-url").value.trim(), btn = e.submitter;
+  const url = $("#tt-url").value.trim(), btn = $("#form-link button[type=submit]");
   btn.disabled = true; resultsEl.innerHTML = ""; $("#video-box").innerHTML = "";
   setStatus("⏳ Analizuję film i szukam piosenki…");
   try {
@@ -119,3 +119,16 @@ if (recBtn) recBtn.onclick = async () => {
 
 const fileIn = $("#file-in");
 if (fileIn) fileIn.onchange = () => fileIn.files[0] && recognize(fileIn.files[0], fileIn.files[0].name);
+
+// --- wklejanie ze schowka (telefon)
+$("#btn-paste").onclick = async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    const m = t.match(/https?:\/\/\S*tiktok\.com\/\S+/i);
+    $("#tt-url").value = m ? m[0] : t.trim();
+    if (m) $("#form-link").requestSubmit();
+  } catch { $("#tt-url").focus(); }
+};
+
+// --- instalowalna aplikacja (PWA)
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});

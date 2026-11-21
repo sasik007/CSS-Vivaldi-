@@ -118,9 +118,38 @@ def check_url(url):
 
 
 # ---------------------------------------------------------------- routes
+URL_IN_TEXT = re.compile(r"https?://\S*tiktok\.com/\S+", re.I)
+
+
 @app.get("/")
 def index():
     return render_template("index.html", has_shazam=Shazam is not None, has_ffmpeg=HAS_FFMPEG)
+
+
+@app.get("/share")
+def share():
+    """Cel udostępniania (Android): TikTok → Udostępnij → ta aplikacja."""
+    blob = " ".join(request.args.get(k, "") for k in ("url", "text", "title"))
+    m = URL_IN_TEXT.search(blob)
+    return render_template("index.html", has_shazam=Shazam is not None, has_ffmpeg=HAS_FFMPEG,
+                           shared_url=m.group(0).rstrip(".,)") if m else "")
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    return app.send_static_file("manifest.webmanifest"), 200, {"Content-Type": "application/manifest+json"}
+
+
+@app.get("/sw.js")
+def service_worker():
+    resp = app.send_static_file("sw.js")
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
+@app.get("/health")
+def health():
+    return "ok"
 
 
 @app.post("/api/tiktok")
@@ -234,4 +263,5 @@ def api_recognize():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n  🎵  TikTok Music Finder działa →  http://127.0.0.1:{port}\n")
-    app.run(host="127.0.0.1", port=port, debug=False)
+    # HOST=0.0.0.0 → dostęp z telefonu w tej samej sieci Wi-Fi
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=port, debug=False)

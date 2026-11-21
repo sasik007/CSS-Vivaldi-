@@ -1,6 +1,6 @@
 :root {
   --bg: #0f0f14; --card: #1a1a22; --line: #2a2a36; --text: #f2f2f5; --muted: #9a9aab;
-  --pink: #fe2c55; --cyan: #25f4ee; --radius: 14px;
+  --pink: #f0506e; --cyan: #a77bff; --radius: 14px;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text);
@@ -12,7 +12,7 @@ h1 { margin: 0; font-size: 2rem; letter-spacing: -.02em;
 .hint { font-size: .9rem; }
 .tabs { display: flex; gap: 8px; margin: 20px 0 12px; flex-wrap: wrap; }
 .tab { background: var(--card); color: var(--text); border: 1px solid var(--line); }
-.tab.active { border-color: var(--pink); background: #2a1520; }
+.tab.active { border-color: var(--pink); background: #2a1626; }
 .panel { display: none; background: var(--card); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 18px; }
 .panel.active { display: block; }
@@ -49,3 +49,11 @@ button.recording { background: #c00; animation: pulse 1s infinite; }
 .links { display: flex; flex-wrap: wrap; gap: 6px; }
 footer { margin-top: 40px; font-size: .85rem; }
 code { background: #222; padding: 1px 5px; border-radius: 4px; }
+@media (max-width: 520px) {
+  main { padding-top: 14px; }
+  h1 { font-size: 1.5rem; }
+  .sub { font-size: .9rem; margin: 4px 0 0; }
+  .tabs { flex-wrap: nowrap; gap: 6px; margin: 14px 0 10px; }
+  .tab { flex: 1; padding: 10px 4px; font-size: .82rem; }
+  .panel { padding: 14px; }
+}
