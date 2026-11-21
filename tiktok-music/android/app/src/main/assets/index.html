@@ -19,6 +19,15 @@
     <button class="tab" data-tab="mic">🎙️ Rozpoznaj</button>
   </nav>
 
+  <details class="sources" id="sources">
+    <summary>⚙️ Źródła wyszukiwania</summary>
+    <label><input type="checkbox" data-src="itunes"> <b>Katalog muzyki</b> <small>tytuł, album, czas, odsłuch 30 s</small></label>
+    <label><input type="checkbox" data-src="youtube"> <b>YouTube</b> <small>odtwarzanie całej piosenki w aplikacji</small></label>
+    <label><input type="checkbox" data-src="openverse"> <b>Openverse</b> <small>Jamendo, ccMixter, Wikimedia… — <b>pobieranie</b> całych utworów</small></label>
+    <label><input type="checkbox" data-src="archive"> <b>Internet Archive</b> <small>tylko licencje Creative Commons — <b>pobieranie</b></small></label>
+    <p class="hint">Do pobrania są tylko utwory na wolnych licencjach (legalne). Popularnych hitów tam zwykle nie ma.</p>
+  </details>
+
   <div id="setup" class="setup" hidden>
     <b>⚡ Automatyczne wykrywanie</b>
     <p>Oglądasz TikToka → otwierasz Music Finder → od razu widzisz, co leci. Włącz raz w ustawieniach:</p>
@@ -68,6 +77,7 @@
 
   <div id="status"></div>
   <div id="results" class="grid"></div>
+  <div id="free"></div>
 
   <footer>
     <p>Całych piosenek słuchasz w Spotify, YouTube Music, Apple Music… Dźwięk z TikToka pobieraj tylko na własny użytek.</p>

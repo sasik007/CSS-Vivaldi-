@@ -26,7 +26,8 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Build APK
-        run: gradle assembleDebug --no-daemon
+        # ponów przy chwilowych problemach z pobieraniem bibliotek
+        run: gradle assembleDebug --no-daemon || (sleep 20 && gradle assembleDebug --no-daemon) || (sleep 60 && gradle assembleDebug --no-daemon)
       - name: Rename APK
         run: cp app/build/outputs/apk/debug/app-debug.apk MusicFinder.apk
       - uses: actions/upload-artifact@v4

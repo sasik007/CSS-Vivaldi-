@@ -472,6 +472,32 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Pobiera cały utwór (wolne licencje) bez zmian; format rozpoznaje po zawartości pliku. */
+    private String doDownloadFile(String url, String baseName) throws Exception {
+        File f = fetchToFile(url, "full.bin");
+        String[] t = sniffAudio(f);
+        String fileName = baseName + "." + t[0];
+        JSONObject info = mediaInfo(f, t[0]);
+        saveToDownloads(f, fileName, t[1]);
+        f.delete();
+        info.put("path", "Pobrane/Music Finder/" + fileName);
+        return info.toString();
+    }
+
+    /** {rozszerzenie, typ MIME} na podstawie pierwszych bajtów pliku. */
+    private static String[] sniffAudio(File f) throws IOException {
+        byte[] h = new byte[12];
+        try (InputStream in = new FileInputStream(f)) { in.read(h); }
+        String head = new String(h, StandardCharsets.ISO_8859_1);
+        if (head.startsWith("OggS")) return new String[]{"ogg", "audio/ogg"};
+        if (head.startsWith("fLaC")) return new String[]{"flac", "audio/flac"};
+        if (head.startsWith("RIFF")) return new String[]{"wav", "audio/wav"};
+        if (head.startsWith("ftyp", 4)) return new String[]{"m4a", "audio/mp4"};
+        if (isMp3(f)) return new String[]{"mp3", "audio/mpeg"};
+        if (head.startsWith("<")) throw new IOException("serwer zwrócił stronę zamiast pliku audio");
+        return new String[]{"mp3", "audio/mpeg"};
+    }
+
     private static boolean isMp3(File f) throws IOException {
         byte[] h = new byte[3];
         try (InputStream in = new FileInputStream(f)) {
@@ -575,6 +601,17 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 try {
                     reply(id, true, doDownload(audioUrl, videoUrl, baseName));
+                } catch (Exception e) {
+                    reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void downloadFile(int id, String url, String baseName) {
+            new Thread(() -> {
+                try {
+                    reply(id, true, doDownloadFile(url, baseName));
                 } catch (Exception e) {
                     reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
                 }

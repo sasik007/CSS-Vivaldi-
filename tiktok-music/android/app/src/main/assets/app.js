@@ -16,6 +16,17 @@ function call(method, ...args) {
   return new Promise((res, rej) => { const id = ++seq; pending[id] = { res, rej }; Android[method](id, ...args); });
 }
 
+// --- przełączniki źródeł
+const src = { itunes: true, youtube: true, openverse: true, archive: true };
+try { Object.assign(src, JSON.parse(localStorage.getItem("sources") || "{}")); } catch {}
+document.querySelectorAll("[data-src]").forEach(cb => {
+  cb.checked = !!src[cb.dataset.src];
+  cb.onchange = () => {
+    src[cb.dataset.src] = cb.checked;
+    try { localStorage.setItem("sources", JSON.stringify(src)); } catch {}
+  };
+});
+
 // --- zakładki
 function showTab(name) {
   document.querySelectorAll(".tab, .panel").forEach(e => e.classList.remove("active"));
@@ -45,6 +56,126 @@ function ytButton(q, label = "▶ Odtwórz całą piosenkę") {
   return `<button class="btn yt" data-play="${esc(q.trim())}">${label}</button>`;
 }
 
+// --- pełne utwory na wolnych licencjach (legalne pobieranie)
+function ccName(code, ver) {
+  code = (code || "").toLowerCase();
+  if (code === "cc0") return "CC0 (domena publiczna)";
+  if (code === "pdm") return "Domena publiczna";
+  return `CC ${code.toUpperCase()}${ver ? " " + ver : ""}`;
+}
+async function searchOpenverse(q) {
+  const url = "https://api.openverse.org/v1/audio/?" + new URLSearchParams({ q, page_size: 12 });
+  const data = JSON.parse(await call("httpGet", url));
+  return (data.results || []).filter(r => r.url).map(r => ({
+    kind: "file", title: r.title, artist: r.creator, source: SOURCE_NAMES[r.source] || r.source || r.provider,
+    license: ccName(r.license, r.license_version), licenseUrl: r.license_url,
+    url: r.url, format: (r.filetype || "").toUpperCase(), duration: (r.duration || 0) / 1000,
+    cover: r.thumbnail, page: r.foreign_landing_url,
+  }));
+}
+async function searchArchive(q) {
+  const query = `(${q}) AND mediatype:audio AND licenseurl:*creativecommons*`;
+  const url = "https://archive.org/advancedsearch.php?" + new URLSearchParams({ q: query, rows: 8, output: "json" })
+    + "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=licenseurl";
+  const data = JSON.parse(await call("httpGet", url));
+  return ((data.response || {}).docs || []).map(d => {
+    const lm = (d.licenseurl || "").match(/licenses\/([a-z-]+)\/([\d.]+)/i) || (d.licenseurl || "").match(/(zero|publicdomain)/i);
+    return {
+      kind: "archive", id: d.identifier, title: d.title, artist: [].concat(d.creator || "").join(", "),
+      source: "Internet Archive", license: lm ? (lm[2] ? ccName(lm[1], lm[2]) : "CC0 (domena publiczna)") : "Creative Commons",
+      licenseUrl: d.licenseurl, cover: `https://archive.org/services/img/${d.identifier}`,
+      page: `https://archive.org/details/${d.identifier}`,
+    };
+  });
+}
+function safeName(s) { return (s || "").replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "utwor"; }
+function dlButton(url, name) {
+  return `<button class="btn small" data-dl="${esc(url)}" data-name="${esc(safeName(name))}">⬇️ Pobierz cały utwór</button>`;
+}
+function renderFree(list) {
+  const box = $("#free");
+  if (!list.length) { box.innerHTML = (src.openverse || src.archive) ? `<p class="hint">⬇️ Brak tego utworu w darmowych, legalnych źródłach do pobrania.</p>` : ""; return; }
+  box.innerHTML = `<h2 class="sec">⬇️ Pełne utwory do pobrania <small>(wolne licencje)</small></h2><div class="grid">` + list.map(s => `
+    <article class="song free">
+      <div class="top">
+        ${s.cover ? `<img src="${esc(s.cover)}" alt="" onerror="this.remove()">` : ""}
+        <div><h3>${esc(s.title)}</h3><div class="meta">${esc(s.artist || "")}</div></div>
+      </div>
+      <dl class="facts">
+        <dt>🌐 Źródło</dt><dd>${esc(s.source || "")}</dd>
+        <dt>📜 Licencja</dt><dd>${s.licenseUrl ? `<a href="#" data-open="${esc(s.licenseUrl)}">${esc(s.license)}</a>` : esc(s.license)}</dd>
+        ${s.duration ? `<dt>⏱ Czas</dt><dd><b>${fmt(s.duration)}</b> (cały utwór)</dd>` : ""}
+        ${s.format ? `<dt>🎵 Format</dt><dd>${esc(s.format)}</dd>` : ""}
+      </dl>
+      ${s.url ? `<audio controls preload="none" src="${esc(s.url)}"></audio>` : ""}
+      <div class="links">
+        ${s.url ? dlButton(s.url, `${s.artist ? s.artist + " - " : ""}${s.title}`) : ""}
+        ${s.kind === "archive" ? `<button class="btn small" data-ia="${esc(s.id)}">📂 Pokaż utwory</button>` : ""}
+        ${s.page ? `<button class="btn ghost small" data-open="${esc(s.page)}">Strona</button>` : ""}
+      </div>
+      <div class="ia-tracks"></div>
+      <div class="dl-info"></div>
+    </article>`).join("") + `</div>`;
+}
+function parseLen(v) {  // "187.3" albo "02:10" / "1:02:10"
+  if (!v) return 0;
+  if (String(v).includes(":")) return String(v).split(":").reduce((a, x) => a * 60 + (parseFloat(x) || 0), 0);
+  return parseFloat(v) || 0;
+}
+const SOURCE_NAMES = { jamendo: "Jamendo", ccmixter: "ccMixter", wikimedia_audio: "Wikimedia", freesound: "Freesound" };
+async function showArchiveTracks(btn) {
+  const card = btn.closest(".song"), box = card.querySelector(".ia-tracks"), id = btn.dataset.ia;
+  btn.disabled = true; box.textContent = "⏳ Wczytuję utwory…";
+  try {
+    const meta = JSON.parse(await call("httpGet", "https://archive.org/metadata/" + encodeURIComponent(id)));
+    const seen = new Set();
+    const files = (meta.files || []).filter(f => /mp3/i.test(f.format || "") && !seen.has(f.title || f.name) && seen.add(f.title || f.name)).slice(0, 40);
+    if (!files.length) { box.textContent = "Brak plików MP3 w tej pozycji."; return; }
+    const artist = [].concat((meta.metadata || {}).creator || "").join(", ");
+    box.innerHTML = `<ol class="tracks">` + files.map(f => {
+      const len = parseLen(f.length), t = f.title || f.name.replace(/\.mp3$/i, "");
+      return `<li><span>${esc(t)}${len ? ` <small>${fmt(len)}</small>` : ""}</span>
+        ${dlButton(`https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(f.name)}`, `${artist ? artist + " - " : ""}${t}`)}</li>`;
+    }).join("") + `</ol>`;
+  } catch (err) { box.textContent = "❌ " + err.message; btn.disabled = false; }
+}
+async function downloadFull(btn) {
+  const card = btn.closest(".song"), info = card.querySelector(".dl-info");
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ Pobieram…";
+  try {
+    const i = JSON.parse(await call("downloadFile", btn.dataset.dl, btn.dataset.name));
+    btn.textContent = "✅ Zapisano";
+    info.innerHTML = fileInfoHtml(i);
+  } catch (err) {
+    btn.disabled = false; btn.textContent = label;
+    setStatus("❌ " + err.message, true);
+  }
+}
+
+/** Szuka we wszystkich włączonych źródłach. */
+async function searchAll(q, title = q, fallback = "") {
+  $("#q").value = q;
+  resultsEl.innerHTML = ""; $("#free").innerHTML = "";
+  setStatus("⏳ Szukam pełnej wersji…");
+  const catalog = !src.itunes ? Promise.resolve(0) : (async () => {
+    let r = await searchSongs(q);
+    if (!r.length && fallback) r = await searchSongs(fallback);
+    renderResults(r);
+    return r.length;
+  })().catch(() => 0);
+  const freeJobs = [];
+  if (src.openverse) freeJobs.push(searchOpenverse(fallback || q).catch(() => []));
+  if (src.archive) freeJobs.push(searchArchive(fallback || q).catch(() => []));
+  const free = Promise.all(freeJobs).then(l => { const all = l.flat(); renderFree(all); return all.length; });
+  const [n, f] = await Promise.all([catalog, free]);
+  const parts = [];
+  if (src.itunes) parts.push(`${n} w katalogu`);
+  if (src.openverse || src.archive) parts.push(`${f} do pobrania`);
+  if (n || f) setStatus(`✅ „${title}”: ${parts.join(", ")}`);
+  else setStatus(src.youtube ? "Nic nie znaleziono w katalogu — kliknij ▶ Odtwórz, poszukamy na YouTube." : "Nic nie znaleziono 😕", true);
+}
+
 function storeLinks(s) {
   const q = `${s.artist} ${s.title}`.trim(), e = encodeURIComponent(q);
   return [
@@ -59,7 +190,7 @@ function storeLinks(s) {
 function renderResults(list) {
   resultsEl.innerHTML = "";
   list.forEach((s, i) => {
-    const links = `<button class="btn yt small" data-play="${esc(`${s.artist} ${s.title}`)}">▶ Odtwórz</button>` +
+    const links = (src.youtube ? `<button class="btn yt small" data-play="${esc(`${s.artist} ${s.title}`)}">▶ Odtwórz</button>` : "") +
       storeLinks(s).map(([n, u]) => `<button class="btn ghost small" data-open="${esc(u)}">${n}</button>`).join("");
     resultsEl.insertAdjacentHTML("beforeend", `
       <article class="song ${i === 0 ? "best" : ""}">
@@ -85,6 +216,11 @@ document.addEventListener("click", (e) => {
   if (b) Android.openUrl(b.dataset.open);
   const p = e.target.closest("[data-play]");
   if (p) playYouTube(p.dataset.play);
+  const d = e.target.closest("[data-dl]");
+  if (d) downloadFull(d);
+  const ia = e.target.closest("[data-ia]");
+  if (ia) showArchiveTracks(ia);
+  if (b || p || d || ia) e.preventDefault();
 });
 
 // --- odtwarzacz YouTube w aplikacji (oficjalny odtwarzacz osadzony)
@@ -146,7 +282,7 @@ function isOriginal(m) {
 async function analyze(url) {
   showTab("link");
   $("#tt-url").value = url;
-  $("#btn-find").disabled = true; resultsEl.innerHTML = ""; $("#video-box").innerHTML = "";
+  $("#btn-find").disabled = true; resultsEl.innerHTML = ""; $("#free").innerHTML = ""; $("#video-box").innerHTML = "";
   setStatus("⏳ Otwieram film na TikToku…");
   try {
     const d = JSON.parse(await call("tiktok", url));
@@ -163,7 +299,7 @@ async function analyze(url) {
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
           ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
           <div id="file-info"></div>
-          <p>${ytButton(ytQuery, orig ? "▶ Szukaj w YouTube" : undefined)}</p>
+          ${src.youtube ? `<p>${ytButton(ytQuery, orig ? "▶ Szukaj w YouTube" : undefined)}</p>` : ""}
           ${canDl ? `<p><button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek z TikToka</button></p>` : ""}
         </div>
       </div>`;
@@ -173,13 +309,7 @@ async function analyze(url) {
       setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
       return;
     }
-    const query = `${m.author || ""} ${m.title}`.trim();
-    setStatus("⏳ Szukam pełnej wersji…");
-    let res = await searchSongs(query);
-    if (!res.length && m.author) res = await searchSongs(m.title);
-    $("#q").value = query;
-    if (res.length) { setStatus(`✅ Pełna wersja „${m.title}”:`); renderResults(res); }
-    else setStatus("Nie znaleziono pełnej wersji w katalogu. Spróbuj 🔍 Szukaj z innym zapisem.", true);
+    await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
   } catch (err) {
     setStatus("❌ " + err.message, true);
   } finally {
@@ -196,8 +326,16 @@ async function downloadCurrent() {
   try {
     const i = JSON.parse(await call("download", m.playUrl || "", d.videoUrl || "", name));
     btn.textContent = "✅ Zapisano";
+    $("#file-info").innerHTML = fileInfoHtml(i);
+  } catch (err) {
+    btn.disabled = false; btn.textContent = "⬇️ Spróbuj pobrać ponownie";
+    setStatus("❌ " + err.message, true);
+  }
+}
+
+function fileInfoHtml(i) {
     const ch = i.channels === 1 ? "mono" : i.channels === 2 ? "stereo" : i.channels ? i.channels + " kanały" : "";
-    $("#file-info").innerHTML = `
+    return `
       <dl class="facts file">
         <dt>📁 Plik</dt><dd>${esc(i.path)}</dd>
         <dt>🎵 Format</dt><dd><b>${esc(i.format || "?")}</b>${i.codec && i.codec !== i.format ? ` (kodek ${esc(i.codec)})` : ""}</dd>
@@ -205,10 +343,6 @@ async function downloadCurrent() {
         ${i.duration ? `<dt>⏱ Czas</dt><dd>${fmt(i.duration)}</dd>` : ""}
         ${i.size ? `<dt>💾 Rozmiar</dt><dd>${fmtSize(i.size)}</dd>` : ""}
       </dl>`;
-  } catch (err) {
-    btn.disabled = false; btn.textContent = "⬇️ Spróbuj pobrać ponownie";
-    setStatus("❌ " + err.message, true);
-  }
 }
 
 $("#form-link").onsubmit = (e) => {
@@ -232,12 +366,7 @@ window.handleShared = (text) => {
 
 $("#form-search").onsubmit = async (e) => {
   e.preventDefault();
-  setStatus("⏳ Szukam…"); resultsEl.innerHTML = "";
-  try {
-    const r = await searchSongs($("#q").value);
-    setStatus(r.length ? `Znaleziono ${r.length} utworów` : "Nic nie znaleziono 😕", !r.length);
-    renderResults(r);
-  } catch (err) { setStatus("❌ " + err.message, true); }
+  await searchAll($("#q").value.trim());
 };
 
 $("#btn-yt").onclick = () => {
@@ -249,22 +378,16 @@ $("#btn-yt").onclick = () => {
 // --- „Teraz na TikToku” (z usługi wykrywania)
 window.handleNowPlaying = async (title) => {
   showTab("link");
-  resultsEl.innerHTML = "";
+  resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
   const q = title.replace(/\s+-\s+/g, " ");
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
-      <p>${ytButton(q)}</p>
+      ${src.youtube ? `<p>${ytButton(q)}</p>` : ""}
     </div></div>`;
   if (orig) return setStatus("To „oryginalny dźwięk” — spróbuj 🎙️ Rozpoznaj albo udostępnij film do aplikacji.", true);
-  setStatus("⏳ Szukam pełnej wersji…");
-  try {
-    const r = await searchSongs(q);
-    $("#q").value = q;
-    if (r.length) { setStatus(`✅ Pełna wersja „${title}”:`); renderResults(r); }
-    else setStatus("Nie znaleziono w katalogu — kliknij ▶ Odtwórz, poszukamy na YouTube.", true);
-  } catch (err) { setStatus("❌ " + err.message, true); }
+  await searchAll(q, title);
 };
 
 // --- baner włączenia wykrywania
