@@ -19,7 +19,7 @@ function callP(onProgress, method, ...args) {
 }
 
 // --- przełączniki źródeł
-const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails: true };
+const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails2: false };
 try { Object.assign(src, JSON.parse(localStorage.getItem("sources") || "{}")); } catch {}
 document.querySelectorAll("[data-src]").forEach(cb => {
   cb.checked = !!src[cb.dataset.src];
@@ -749,7 +749,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0) => {
   grabForDetailsAt = 0;
   const myKey = cardKey;
   // w okienku obok TikToka: po 1,5 s stabilnego filmu pobierz dane (czas) automatycznie
-  if (src.autodetails && Android.watcherEnabled() && Android.isMultiWindow && Android.isMultiWindow())
+  if (src.autodetails2 && Android.watcherEnabled() && Android.isMultiWindow && Android.isMultiWindow())
     setTimeout(() => { if (myKey === cardKey && document.visibilityState === "visible" && $("#modal").hidden) grabDetails(myKey); }, 1500);
   showTab("link");
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
