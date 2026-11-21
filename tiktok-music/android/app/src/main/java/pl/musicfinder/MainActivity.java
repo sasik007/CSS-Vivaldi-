@@ -9,6 +9,9 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
+import android.graphics.drawable.Icon;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -44,6 +47,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Music Finder — działa samodzielnie na telefonie, bez serwera.
@@ -77,11 +83,15 @@ public class MainActivity extends Activity {
             + "  cover:m.coverLarge||m.coverMedium||m.coverThumb,duration:m.duration}});"
             + "}catch(e){return null;}})()";
 
+    static final String SHORTCUT_ID = "find_song";
+    static final Pattern TT_LINK = Pattern.compile("https?://\\S*tiktok\\.com/\\S+", Pattern.CASE_INSENSITIVE);
+
     private WebView ui;
     private WebView scraper;
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean uiReady = false;
     private String pendingShare = null;
+    private long lastShareAt = 0;
 
     // stan bieżącego odczytu TikToka
     private int scrapeId = 0;
@@ -141,6 +151,7 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         ui.loadUrl("file:///android_asset/index.html");
+        publishShareShortcut();
         handleIntent(getIntent());
 
         if (Build.VERSION.SDK_INT < 29
@@ -161,7 +172,66 @@ public class MainActivity extends Activity {
         if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
         String text = intent.getStringExtra(Intent.EXTRA_TEXT);
         if (text == null) return;
+        rememberLink(text);
+        lastShareAt = System.currentTimeMillis();
+        if (Build.VERSION.SDK_INT >= 25) {
+            // każde użycie podnosi Music Finder wyżej w oknie „Udostępnij”
+            try { getSystemService(ShortcutManager.class).reportShortcutUsed(SHORTCUT_ID); } catch (Exception ignored) { }
+        }
         if (uiReady) deliverShare(text); else pendingShare = text;
+    }
+
+    /** Skrót „Znajdź piosenkę” w górnym rzędzie systemowego okna udostępniania. */
+    private void publishShareShortcut() {
+        if (Build.VERSION.SDK_INT < 30) return;
+        try {
+            ShortcutManager sm = getSystemService(ShortcutManager.class);
+            Intent i = new Intent(Intent.ACTION_MAIN, null, this, MainActivity.class);
+            ShortcutInfo si = new ShortcutInfo.Builder(this, SHORTCUT_ID)
+                    .setShortLabel("Znajdź piosenkę")
+                    .setLongLabel("Music Finder — znajdź piosenkę")
+                    .setIcon(Icon.createWithResource(this, R.mipmap.ic_launcher))
+                    .setCategories(Collections.singleton("pl.musicfinder.category.SHARE_TARGET"))
+                    .setIntent(i)
+                    .setLongLived(true)
+                    .setRank(0)
+                    .build();
+            sm.pushDynamicShortcut(si);
+        } catch (Exception ignored) { }
+    }
+
+    // ------------------------------------------------------------------ automatyczny link ze schowka
+
+    private static String extractLink(String text) {
+        if (text == null) return null;
+        Matcher m = TT_LINK.matcher(text);
+        return m.find() ? m.group() : null;
+    }
+
+    private void rememberLink(String text) {
+        String link = extractLink(text);
+        if (link != null) getSharedPreferences("mf", MODE_PRIVATE).edit().putString("last", link).apply();
+    }
+
+    /** TikTok → „Kopiuj link” → otwierasz Music Finder → szuka sam. */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (!hasFocus || System.currentTimeMillis() - lastShareAt < 5000) return;
+        main.postDelayed(() -> {
+            try {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                ClipData clip = cm == null ? null : cm.getPrimaryClip();
+                if (clip == null || clip.getItemCount() == 0) return;
+                CharSequence t = clip.getItemAt(0).coerceToText(this);
+                String link = extractLink(t == null ? null : t.toString());
+                if (link == null) return;
+                String last = getSharedPreferences("mf", MODE_PRIVATE).getString("last", "");
+                if (link.equals(last)) return;  // ten link już był
+                rememberLink(link);
+                if (uiReady) deliverShare(link); else pendingShare = link;
+            } catch (Exception ignored) { }
+        }, 300);
     }
 
     private void deliverShare(String text) {

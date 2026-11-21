@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Music Finder w górnym rzędzie systemowego okna „Udostępnij” (Direct Share) -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="pl.musicfinder.MainActivity">
+        <data android:mimeType="text/plain" />
+        <category android:name="pl.musicfinder.category.SHARE_TARGET" />
+    </share-target>
+</shortcuts>
