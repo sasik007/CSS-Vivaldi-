@@ -228,14 +228,14 @@ async function updateFullUI(target, ytQuery) {
   } catch { el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`; }
 }
 
-/** Otwiera piosenkę w aplikacji YouTube Music (tam z Premium: ⬇️ Pobierz offline). */
+/** Otwiera film z piosenką w aplikacji YouTube (pod filmem: ⬇️ Pobierz — z Premium). */
 async function openInYtMusic(btn) {
   const q = btn.dataset.ytm, label = btn.textContent;
-  btn.disabled = true; btn.textContent = "⏳ Otwieram YouTube Music…";
-  let url = "https://music.youtube.com/search?q=" + encodeURIComponent(q);
+  btn.disabled = true; btn.textContent = "⏳ Otwieram YouTube…";
+  let url = ytSearch(q);
   try {
     const v = JSON.parse(await call("youtubeSearch", q))[0];
-    if (v) url = "https://music.youtube.com/watch?v=" + v.id;
+    if (v) url = "https://www.youtube.com/watch?v=" + v.id;
   } catch {}
   Android.openUrl(url);
   btn.disabled = false; btn.textContent = label;
@@ -246,8 +246,8 @@ document.addEventListener("click", (e) => {
 });
 
 function fullButtonHtml(q) {
-  return `<p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube Music</button>
-    <small class="muted">Otwiera piosenkę w YouTube Music — z Premium pobierzesz ją tam offline.</small></p>
+  return `<p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
+    <small class="muted">Otwiera film w YouTube — pod filmem kliknij „Pobierz” (YouTube Premium).</small></p>
     <p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
     <small class="muted" id="np-full-src"></small></p><div id="np-file"></div>`;
 }
