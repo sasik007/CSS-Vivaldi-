@@ -12,8 +12,10 @@ function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Ma
 const pending = {};
 let seq = 0;
 window.__cb = (id, ok, text) => { const p = pending[id]; delete pending[id]; if (p) ok ? p.res(text) : p.rej(new Error(text)); };
-function call(method, ...args) {
-  return new Promise((res, rej) => { const id = ++seq; pending[id] = { res, rej }; Android[method](id, ...args); });
+window.__progress = (id, label) => { const p = pending[id]; if (p && p.onProgress) p.onProgress(label); };
+function call(method, ...args) { return callP(null, method, ...args); }
+function callP(onProgress, method, ...args) {
+  return new Promise((res, rej) => { const id = ++seq; pending[id] = { res, rej, onProgress }; Android[method](id, ...args); });
 }
 
 // --- przełączniki źródeł
@@ -144,7 +146,7 @@ async function downloadFull(btn) {
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = "⏳ Pobieram…";
   try {
-    const i = JSON.parse(await call("downloadFile", btn.dataset.dl, btn.dataset.name));
+    const i = JSON.parse(await callP(l => btn.textContent = "⏳ " + l, "downloadFile", btn.dataset.dl, btn.dataset.name));
     btn.textContent = "✅ Zapisano";
     info.innerHTML = fileInfoHtml(i);
   } catch (err) {
@@ -324,7 +326,7 @@ async function downloadCurrent() {
     .replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "tiktok";
   const btn = $("#btn-dl"); btn.disabled = true; btn.textContent = "⏳ Pobieram…";
   try {
-    const i = JSON.parse(await call("download", m.playUrl || "", d.videoUrl || "", name));
+    const i = JSON.parse(await callP(l => btn.textContent = "⏳ " + l, "download", m.playUrl || "", d.videoUrl || "", name));
     btn.textContent = "✅ Zapisano";
     $("#file-info").innerHTML = fileInfoHtml(i);
   } catch (err) {

@@ -3,6 +3,10 @@ package pl.musicfinder;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentResolver;
@@ -24,6 +28,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.ViewGroup;
@@ -53,6 +58,8 @@ import java.net.URLEncoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -181,6 +188,15 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT < 29
                 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        }
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
+        }
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel ch = new NotificationChannel(CH_DL, "Pobieranie", NotificationManager.IMPORTANCE_LOW);
+            ch.setDescription("Postęp pobierania plików");
+            getSystemService(NotificationManager.class).createNotificationChannel(ch);
         }
     }
 
@@ -379,15 +395,21 @@ public class MainActivity extends Activity {
     }
 
     /** Pobiera plik do cache. Zwraca {plik, content-type}. */
-    private File fetchToFile(String url, String name) throws IOException {
+    private File fetchToFile(String url, String name, Job job) throws IOException {
         HttpURLConnection c = open(url, "https://www.tiktok.com/");
         int code = c.getResponseCode();
         if (code >= 400) throw new IOException("HTTP " + code);
-        File f = new File(getCacheDir(), name);
+        long total = c.getContentLengthLong();
+        File f = new File(getCacheDir(), job.tmp(name));
         try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(f)) {
             byte[] buf = new byte[65536];
             int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            long done = 0;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                done += n;
+                job.progress(done, total);
+            }
         } finally {
             c.disconnect();
         }
@@ -397,16 +419,20 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ pobieranie
 
-    private String doDownload(String audioUrl, String videoUrl, String baseName) throws Exception {
+    private String doDownload(String audioUrl, String videoUrl, String baseName, Job job) throws Exception {
         File out = null;
         String ext = "m4a", mime = "audio/mp4";
 
         // 1) gotowy plik dźwięku TikToka (zwykle MP3)
         if (audioUrl != null && !audioUrl.isEmpty()) {
             try {
-                File f = fetchToFile(audioUrl, "sound.bin");
+                File f = fetchToFile(audioUrl, "sound.bin", job);
                 if (isMp3(f)) { ext = "mp3"; mime = "audio/mpeg"; }
-                else { File m4a = new File(getCacheDir(), "sound.m4a"); extractAudio(f, m4a); f.delete(); f = m4a; }
+                else {
+                    job.stage("Wycinam dźwięk…");
+                    File m4a = new File(getCacheDir(), job.tmp("sound.m4a"));
+                    extractAudio(f, m4a); f.delete(); f = m4a;
+                }
                 out = f;
             } catch (Exception e) {
                 out = null;
@@ -414,8 +440,9 @@ public class MainActivity extends Activity {
         }
         // 2) wideo → wycięcie ścieżki dźwiękowej (bez ponownego kodowania)
         if (out == null && videoUrl != null && !videoUrl.isEmpty()) {
-            File video = fetchToFile(videoUrl, "video.mp4");
-            File m4a = new File(getCacheDir(), "sound.m4a");
+            File video = fetchToFile(videoUrl, "video.mp4", job);
+            job.stage("Wycinam dźwięk z filmu…");
+            File m4a = new File(getCacheDir(), job.tmp("sound.m4a"));
             extractAudio(video, m4a);
             video.delete();
             out = m4a;
@@ -425,8 +452,10 @@ public class MainActivity extends Activity {
 
         String fileName = baseName + "." + ext;
         JSONObject info = mediaInfo(out, ext);
-        saveToDownloads(out, fileName, mime);
+        job.stage("Zapisuję…");
+        Uri saved = saveToDownloads(out, fileName, mime);
         out.delete();
+        job.done(fileName, saved, mime);
         info.put("path", "Pobrane/Music Finder/" + fileName);
         return info.toString();
     }
@@ -473,13 +502,15 @@ public class MainActivity extends Activity {
     }
 
     /** Pobiera cały utwór (wolne licencje) bez zmian; format rozpoznaje po zawartości pliku. */
-    private String doDownloadFile(String url, String baseName) throws Exception {
-        File f = fetchToFile(url, "full.bin");
+    private String doDownloadFile(String url, String baseName, Job job) throws Exception {
+        File f = fetchToFile(url, "full.bin", job);
         String[] t = sniffAudio(f);
         String fileName = baseName + "." + t[0];
         JSONObject info = mediaInfo(f, t[0]);
-        saveToDownloads(f, fileName, t[1]);
+        job.stage("Zapisuję…");
+        Uri saved = saveToDownloads(f, fileName, t[1]);
         f.delete();
+        job.done(fileName, saved, t[1]);
         info.put("path", "Pobrane/Music Finder/" + fileName);
         return info.toString();
     }
@@ -542,7 +573,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void saveToDownloads(File src, String name, String mime) throws IOException {
+    private Uri saveToDownloads(File src, String name, String mime) throws IOException {
         if (Build.VERSION.SDK_INT >= 29) {
             ContentResolver cr = getContentResolver();
             ContentValues v = new ContentValues();
@@ -554,6 +585,7 @@ public class MainActivity extends Activity {
             try (InputStream in = new FileInputStream(src); OutputStream out = cr.openOutputStream(uri)) {
                 copy(in, out);
             }
+            return uri;
         } else {
             File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Music Finder");
             if (!dir.exists() && !dir.mkdirs()) throw new IOException("Brak dostępu do folderu Pobrane");
@@ -562,6 +594,7 @@ public class MainActivity extends Activity {
                 copy(in, out);
             }
             MediaScannerConnection.scanFile(this, new String[]{dst.getAbsolutePath()}, new String[]{mime}, null);
+            return null;
         }
     }
 
@@ -570,6 +603,108 @@ public class MainActivity extends Activity {
         byte[] buf = new byte[65536];
         int n;
         while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+    }
+
+    // ------------------------------------------------------------------ powiadomienia o pobieraniu
+
+    static final String CH_DL = "downloads";
+    private static final AtomicInteger NOTIF_SEQ = new AtomicInteger(100);
+
+    private Notification.Builder newNotification() {
+        return Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CH_DL) : new Notification.Builder(this);
+    }
+
+    private static String mb(long b) {
+        return b >= 1048576 ? String.format(Locale.US, "%.1f MB", b / 1048576.0) : (b / 1024) + " KB";
+    }
+
+    /** Jedno pobieranie: pasek postępu w powiadomieniu + postęp na przycisku w aplikacji. */
+    class Job {
+        final int jsId;
+        final int notifId = NOTIF_SEQ.incrementAndGet();
+        final String title;
+        final Notification.Builder nb;
+        final NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        long lastUpdate = 0;
+
+        Job(int jsId, String title) {
+            this.jsId = jsId;
+            this.title = title;
+            nb = newNotification()
+                    .setSmallIcon(android.R.drawable.stat_sys_download)
+                    .setContentTitle(title)
+                    .setContentText("Łączę…")
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setProgress(0, 0, true);
+            post();
+        }
+
+        String tmp(String name) { return notifId + "-" + name; }
+
+        void progress(long done, long total) {
+            long now = SystemClock.uptimeMillis();
+            if (now - lastUpdate < 400 && done != total) return;
+            lastUpdate = now;
+            String label;
+            if (total > 0) {
+                int pct = (int) (done * 100 / total);
+                label = pct + "% · " + mb(done) + " / " + mb(total);
+                nb.setProgress(100, pct, false);
+            } else {
+                label = mb(done);
+                nb.setProgress(0, 0, true);
+            }
+            nb.setContentText(label);
+            post();
+            js(label);
+        }
+
+        void stage(String text) {
+            nb.setProgress(0, 0, true).setContentText(text);
+            post();
+            js(text);
+        }
+
+        void done(String fileName, Uri uri, String mime) {
+            Notification.Builder b = newNotification()
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setContentTitle("✅ Pobrano")
+                    .setContentText(fileName)
+                    .setSubText("Pobrane/Music Finder")
+                    .setAutoCancel(true);
+            if (uri != null) {
+                Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                b.setContentIntent(PendingIntent.getActivity(MainActivity.this, notifId, view,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+            }
+            try { nm.notify(notifId, b.build()); } catch (Exception ignored) { }
+        }
+
+        void fail(String msg) {
+            Notification.Builder b = newNotification()
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle("Pobieranie nie powiodło się")
+                    .setContentText(title + (msg != null ? " — " + msg : ""))
+                    .setAutoCancel(true);
+            try { nm.notify(notifId, b.build()); } catch (Exception ignored) { }
+        }
+
+        /** Usuwa pliki tymczasowe tego pobierania. */
+        void cleanup() {
+            File[] files = getCacheDir().listFiles((d, n) -> n.startsWith(notifId + "-"));
+            if (files != null) for (File f : files) f.delete();
+        }
+
+        private void post() {
+            try { nm.notify(notifId, nb.build()); } catch (Exception ignored) { }
+        }
+
+        private void js(String label) {
+            main.post(() -> ui.evaluateJavascript(
+                    "window.__progress&&window.__progress(" + jsId + "," + JSONObject.quote(label) + ")", null));
+        }
     }
 
     // ------------------------------------------------------------------ most JS ↔ Java
@@ -599,10 +734,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void download(int id, String audioUrl, String videoUrl, String baseName) {
             new Thread(() -> {
+                Job job = new Job(id, baseName);
                 try {
-                    reply(id, true, doDownload(audioUrl, videoUrl, baseName));
+                    reply(id, true, doDownload(audioUrl, videoUrl, baseName, job));
                 } catch (Exception e) {
+                    job.fail(e.getMessage());
                     reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
+                } finally {
+                    job.cleanup();
                 }
             }).start();
         }
@@ -610,10 +749,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void downloadFile(int id, String url, String baseName) {
             new Thread(() -> {
+                Job job = new Job(id, baseName);
                 try {
-                    reply(id, true, doDownloadFile(url, baseName));
+                    reply(id, true, doDownloadFile(url, baseName, job));
                 } catch (Exception e) {
+                    job.fail(e.getMessage());
                     reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
+                } finally {
+                    job.cleanup();
                 }
             }).start();
         }
