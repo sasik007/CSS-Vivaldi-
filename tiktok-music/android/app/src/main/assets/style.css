@@ -98,3 +98,5 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .btn.full { width: 100%; background: #1f8a4c; text-align: center; margin-top: 8px; }
 .btn.full:disabled { background: #2a2a36; color: var(--muted); cursor: not-allowed; opacity: 1; }
 #np-full-src { display: block; margin-top: 4px; }
+.btn.ytm { width: 100%; text-align: center; background: #ff0033; margin-top: 8px; }
+.btn.ytm + small { display: block; margin-top: 4px; }

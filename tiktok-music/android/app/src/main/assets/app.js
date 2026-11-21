@@ -228,8 +228,27 @@ async function updateFullUI(target, ytQuery) {
   } catch { el.innerHTML = `<span class="badge">⏱ Czas</span><small class="muted">nieznany</small>`; }
 }
 
-function fullButtonHtml() {
-  return `<p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
+/** Otwiera piosenkę w aplikacji YouTube Music (tam z Premium: ⬇️ Pobierz offline). */
+async function openInYtMusic(btn) {
+  const q = btn.dataset.ytm, label = btn.textContent;
+  btn.disabled = true; btn.textContent = "⏳ Otwieram YouTube Music…";
+  let url = "https://music.youtube.com/search?q=" + encodeURIComponent(q);
+  try {
+    const v = JSON.parse(await call("youtubeSearch", q))[0];
+    if (v) url = "https://music.youtube.com/watch?v=" + v.id;
+  } catch {}
+  Android.openUrl(url);
+  btn.disabled = false; btn.textContent = label;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-ytm]");
+  if (b) openInYtMusic(b);
+});
+
+function fullButtonHtml(q) {
+  return `<p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube Music</button>
+    <small class="muted">Otwiera piosenkę w YouTube Music — z Premium pobierzesz ją tam offline.</small></p>
+    <p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
     <small class="muted" id="np-full-src"></small></p><div id="np-file"></div>`;
 }
 
@@ -414,7 +433,7 @@ async function analyze(url) {
             ${canDl ? `<button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek</button>` : ""}
           </div>
           <div id="file-info"></div>
-          ${fullButtonHtml()}
+          ${fullButtonHtml(ytQuery)}
         </div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = downloadCurrent;
@@ -550,7 +569,7 @@ window.handleNowPlaying = async (title, hint = "") => {
         <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
         <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
       </div>
-      ${fullButtonHtml()}
+      ${fullButtonHtml(q)}
     </div></div>`;
   $("#np-dl").onclick = () => {
     autoDownloadAt = Date.now();

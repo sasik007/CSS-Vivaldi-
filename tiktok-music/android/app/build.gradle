@@ -7,8 +7,8 @@ android {
         applicationId 'pl.musicfinder'
         minSdk 24
         targetSdk 34
-        versionCode 20
-        versionName '4.3'
+        versionCode 21
+        versionName '4.4'
     }
     // Stały klucz podpisu — dzięki niemu nowe wersje instalują się jako aktualizacja.
     // (Klucz tylko do tej prywatnej aplikacji, nie do Sklepu Play.)
