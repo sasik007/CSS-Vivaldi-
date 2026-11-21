@@ -2,6 +2,7 @@ package pl.musicfinder;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.SharedPreferences;
+import android.graphics.Rect;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
@@ -41,6 +42,9 @@ public class TikTokWatcher extends AccessibilityService {
     private int bestScore;
     private int nodeCount;
     private final List<String> seen = new ArrayList<>();
+    private final List<String> cands = new ArrayList<>();
+    private final Rect win = new Rect();
+    private final Rect tmp = new Rect();
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
@@ -52,20 +56,29 @@ public class TikTokWatcher extends AccessibilityService {
         bestScore = 0;
         nodeCount = 0;
         seen.clear();
+        cands.clear();
         int windows = 0;
 
         // 1) wszystkie okna (okienko, podzielony ekran) — szukamy tych należących do TikToka
         try {
             for (AccessibilityWindowInfo w : getWindows()) {
                 AccessibilityNodeInfo r = w.getRoot();
-                if (r != null && isTikTok(r.getPackageName())) { windows++; scan(r, 0); }
+                if (r != null && isTikTok(r.getPackageName())) {
+                    windows++;
+                    w.getBoundsInScreen(win);
+                    scan(r, 0);
+                }
             }
         } catch (Exception ignored) { }
         // 2) awaryjnie: aktywne okno
         if (windows == 0) {
             try {
                 AccessibilityNodeInfo r = getRootInActiveWindow();
-                if (r != null && isTikTok(r.getPackageName())) { windows++; scan(r, 0); }
+                if (r != null && isTikTok(r.getPackageName())) {
+                    windows++;
+                    r.getBoundsInScreen(win);
+                    scan(r, 0);
+                }
             } catch (Exception ignored) { }
         }
         if (windows == 0) return;
@@ -75,7 +88,10 @@ public class TikTokWatcher extends AccessibilityService {
         // diagnostyka: co widać na ekranie TikToka
         JSONArray dbg = new JSONArray();
         for (String s : seen) dbg.put(s);
-        e.putString(KEY_DBG, "{\"windows\":" + windows + ",\"nodes\":" + nodeCount + ",\"texts\":" + dbg + "}");
+        JSONArray cj = new JSONArray();
+        for (String s : cands) cj.put(s);
+        e.putString(KEY_DBG, "{\"windows\":" + windows + ",\"nodes\":" + nodeCount + ",\"texts\":" + dbg
+                + ",\"candidates\":" + cj + "}");
         e.putLong(KEY_DBG_TIME, now);
         if (best != null) {
             String title = clean(best);
@@ -94,8 +110,13 @@ public class TikTokWatcher extends AccessibilityService {
         if (n == null || depth > 60) return;
         nodeCount++;
         if (n.isVisibleToUser()) {
-            consider(n.getText());
-            consider(n.getContentDescription());
+            // tylko elementy w całości na ekranie, w oknie TikToka —
+            // sąsiednie (wczytane z wyprzedzeniem) filmy leżą poza nim
+            n.getBoundsInScreen(tmp);
+            boolean onScreen = tmp.width() > 0 && tmp.height() > 0
+                    && win.contains(tmp.centerX(), tmp.centerY());
+            consider(n.getText(), onScreen);
+            consider(n.getContentDescription(), onScreen);
         }
         for (int i = 0; i < n.getChildCount(); i++) {
             AccessibilityNodeInfo c = n.getChild(i);
@@ -103,18 +124,21 @@ public class TikTokWatcher extends AccessibilityService {
         }
     }
 
-    private void consider(CharSequence cs) {
+    private void consider(CharSequence cs, boolean onScreen) {
         if (cs == null) return;
         String s = cs.toString().trim();
         if (s.isEmpty() || s.length() > 300) return;
-        if (seen.size() < 60 && !seen.contains(s)) seen.add(s.length() > 120 ? s.substring(0, 120) + "…" : s);
+        if (onScreen && seen.size() < 60 && !seen.contains(s)) seen.add(s.length() > 120 ? s.substring(0, 120) + "…" : s);
         int score = 0;
         String val = s;
         Matcher m = LABEL.matcher(s);
         if (m.find()) { score = 3; val = m.group(1); }
         else if (startsWithNote(s)) { score = 2; }
         else if (ORIGINAL.matcher(s).find() && s.length() < 120) { score = 1; }
-        if (score > bestScore) { bestScore = score; best = val; }
+        if (score == 0) return;
+        if (cands.size() < 12) cands.add((onScreen ? "✓ " : "✗ poza ekranem ") + "[" + score + "] " + s
+                + " @" + tmp.top + "-" + tmp.bottom);
+        if (onScreen && score > bestScore) { bestScore = score; best = val; }
     }
 
     private static boolean startsWithNote(String s) {

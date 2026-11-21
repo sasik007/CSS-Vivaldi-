@@ -454,6 +454,9 @@ $("#btn-diag").onclick = () => {
     `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
     `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
     ``,
+    `Kandydaci na nazwę dźwięku (✓ = użyty, bo jest na ekranie):`,
+    ...((sc.candidates || []).map(t => "  " + t)),
+    ``,
     `Napisy widoczne na ekranie TikToka:`,
     ...((sc.texts || []).map(t => "• " + t)),
   ];
