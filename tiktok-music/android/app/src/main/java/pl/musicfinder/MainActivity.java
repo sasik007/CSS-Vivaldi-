@@ -115,6 +115,16 @@ public class MainActivity extends Activity {
     private String pendingShare = null;
     private long lastShareAt = 0;
     private String pendingJs = null;
+    private volatile boolean grabbedByUs = false;
+
+    /** Sprząta pozostałości (np. po awarii): pliki tymczasowe pobierania i cache przeglądarki. */
+    private void cleanupJunk() {
+        new Thread(() -> {
+            File[] files = getCacheDir().listFiles((d, n) -> n.matches("\\d+-.*") || n.endsWith(".bin") || n.endsWith(".mp4") || n.endsWith(".m4a"));
+            if (files != null) for (File f : files) f.delete();
+        }).start();
+        main.postDelayed(() -> { try { scraper.clearCache(true); } catch (Exception ignored) { } }, 3000);
+    }
 
     // stan bieżącego odczytu TikToka
     private int scrapeId = 0;
@@ -191,6 +201,7 @@ public class MainActivity extends Activity {
 
         ui.loadUrl("https://" + APP_HOST + "/index.html");
         publishShareShortcut();
+        cleanupJunk();
         handleIntent(getIntent());
 
         if (Build.VERSION.SDK_INT < 29
@@ -354,6 +365,13 @@ public class MainActivity extends Activity {
                 String last = getSharedPreferences("mf", MODE_PRIVATE).getString("last", "");
                 if (link.equals(last)) return false;  // ten link już był
                 rememberLink(link);
+                if (grabbedByUs) {  // link skopiowany automatycznie → usuń ze schowka
+                    grabbedByUs = false;
+                    try {
+                        if (Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip();
+                        else cm.setPrimaryClip(ClipData.newPlainText("", ""));
+                    } catch (Exception ignored) { }
+                }
                 if (uiReady) deliverShare(link); else pendingShare = link;
                 return true;
             } catch (Exception ignored) { }
@@ -516,6 +534,8 @@ public class MainActivity extends Activity {
                         String texts = decodeJsResult(r2);
                         reply(id, true, texts == null ? "[]" : texts);
                         cmView.loadUrl("about:blank");
+                        cmView.clearCache(true);
+                        cmView.clearHistory();
                     });
                 }
             });
@@ -577,6 +597,8 @@ public class MainActivity extends Activity {
         scrapePoll = null;
         scraper.stopLoading();
         scraper.loadUrl("about:blank");
+        scraper.clearCache(true);   // bez śmieci: cache stron TikToka od razu precz
+        scraper.clearHistory();
         CookieManager.getInstance().flush();
     }
 
@@ -1177,6 +1199,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean grabTikTokLink() {
             if (!watcherEnabled()) return false;
+            grabbedByUs = true;
             // ten sam link mógł już być wyszukany — pozwól go użyć ponownie
             getSharedPreferences("mf", MODE_PRIVATE).edit().remove("last").apply();
             main.post(() -> {
