@@ -191,14 +191,45 @@ function isSameSong(f, t) {
 
 let lastTarget = null, lastYt = null;
 /** Pierwszy film z YouTube, którego tytuł zawiera tytuł piosenki (i ew. wykonawcę). */
+// --- wersja utworu (remix, sped up, slowed…) — żeby YouTube znalazł tę samą wersję co na TikToku
+const VERSION_RE = /\(([^()]*?(?:remix|mix|sped ?up|speed ?up|slowed|reverb|nightcore|bass ?boost(?:ed)?|phonk|edit|bootleg|mashup|8d|vip|flip|rework|extended|club|techno|house|hardstyle|funk)[^()]*)\)|((?:[\p{L}\p{N}.'&]+ ){0,3}(?:remix|bootleg|mashup|rework))(?![\p{L}])|(sped ?up|speed ?up|slowed(?: ?\+? ?reverb)?|nightcore|bass ?boosted|8d audio|phonk)/iu;
+const VER_WORDS = /remix|sped|speed|slowed|reverb|nightcore|boost|phonk|edit|bootleg|mashup|\b8d\b|flip|rework|hardstyle|techno|funk|club|extended/gi;
+let cardVersion = "";
+function detectVersion(...texts) {
+  for (const t of texts) {
+    const m = stripEmoji(t || "").match(VERSION_RE);
+    if (!m) continue;
+    const v = (m[1] || m[2] || m[3] || "").replace(/\s+/g, " ").trim();
+    if (v && !/^(original|official|radio edit$)/i.test(v) && !/original mix/i.test(v)) return v;
+  }
+  return "";
+}
+
+/** Najlepszy film: tytuł piosenki + ta sama wersja (remix/sped up…); bez wersji → oryginał. */
 async function findYtMatch(t, q) {
   lastYt = null;
   if (!t || !t.title || !q) return null;
   try {
     const list = JSON.parse(await call("youtubeSearch", q));
     const tt = norm(t.title), ta = norm((t.artist || "").replace(/\b(feat|ft)\.?.*$/i, ""));
-    lastYt = list.find(v => { const n = norm(v.title); return n.includes(tt) && (!ta || n.includes(ta)); })
-      || list.find(v => norm(v.title).includes(tt)) || null;
+    const vWords = (cardVersion.match(VER_WORDS) || []).map(w => w.toLowerCase());
+    const vNorm = norm(cardVersion);
+    let best = null, bestScore = 0;
+    for (const v of list) {
+      const n = norm(v.title), raw = v.title.toLowerCase();
+      if (!n.includes(tt)) continue;
+      let sc = 100;
+      if (ta && n.includes(ta)) sc += 10;
+      const has = (raw.match(VER_WORDS) || []).map(w => w.toLowerCase());
+      if (vWords.length) {
+        const hit = vWords.filter(w => has.includes(w)).length;
+        sc += hit === vWords.length ? 50 : hit ? 25 : -20;
+        if (vNorm && n.includes(vNorm)) sc += 30;           // np. ten sam „DJ X remix”
+        if (/official (music )?(video|audio)/i.test(v.title)) sc -= 10;
+      } else if (has.length) sc -= 30;                       // na TikToku oryginał → bez remixów
+      if (sc > bestScore) { bestScore = sc; best = v; }
+    }
+    lastYt = best;
   } catch {}
   return lastYt;
 }
@@ -213,14 +244,15 @@ function cleanQuery(q) {
   return stripEmoji(q || "")
     .replace(/#\S+|@\S+/g, " ")
     .replace(/\b(oryginalny dźwięk|dźwięk oryginalny|original sound|son original|sonido original|som original|wykonawcy|użytkownika)\b/gi, " ")
-    .replace(/\((?:cover|remix|sped up|slowed[^)]*|nightcore|karaoke|tiktok[^)]*)\)/gi, " ")
-    .replace(/\b(cover|sped up|slowed)\b/gi, " ")
+    .replace(/\((?:cover|karaoke|tiktok[^)]*)\)/gi, " ")
+    .replace(/\bcover\b/gi, " ")
     .replace(/[|•–—\-_:;,"„”“]+/g, " ")
     .replace(/\s+/g, " ").trim();
 }
 /** Ustawia zapytanie YouTube na karcie; pusty = brak tytułu (przyciski nieaktywne). */
 function setYtQuery(q) {
   q = cleanQuery(q);
+  if (q && cardVersion && !norm(q).includes(norm(cardVersion))) q = `${q} ${cleanQuery(cardVersion)}`;
   const box = $("#video-box");
   box.querySelectorAll("[data-yt-search]").forEach(b => {
     b.disabled = !q;
@@ -228,7 +260,7 @@ function setYtQuery(q) {
   });
   box.querySelectorAll("[data-ytm]").forEach(b => { b.disabled = !q; b.dataset.ytm = q; });
   const lab = $("#yt-q");
-  if (lab) lab.innerHTML = q ? `🔎 szuka: <b>${esc(q)}</b>` : `Brak tytułu piosenki — użyj 🎙️ Rozpoznaj (Shazam).`;
+  if (lab) lab.innerHTML = q ? `🔎 szuka: <b>${esc(q)}</b>${cardVersion ? ` · 🎚 wersja: <b>${esc(cardVersion)}</b>` : ""}` : `Brak tytułu piosenki — użyj 🎙️ Rozpoznaj (Shazam).`;
   return q;
 }
 
@@ -499,6 +531,7 @@ async function analyze(url) {
     if (autoDl) autoDownloadAt = 0;
 
     const ph = parseHint(d.desc);
+    cardVersion = detectVersion(m.title, d.desc);
     const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
     if (useCap) {
       current.hint = ph.q;
@@ -792,6 +825,7 @@ async function loadCardDetails(url) {
 }
 
 window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
+  cardVersion = detectVersion(title, hint);
   npCalls++;
   cardKey = title + "|" + hint + "|" + Date.now();
   cardData = null;
