@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TikTok Music Finder</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<main>
+  <header>
+    <h1>🎵 TikTok Music Finder</h1>
+    <p class="sub">Wklej link z TikToka, nagraj urywek albo wpisz kawałek tekstu — znajdziemy całą piosenkę.</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="link">🔗 Link TikTok</button>
+    <button class="tab" data-tab="mic">🎙️ Nagraj urywek</button>
+    <button class="tab" data-tab="search">🔍 Szukaj</button>
+  </nav>
+
+  <section class="panel active" id="tab-link">
+    <form id="form-link" class="row">
+      <input id="tt-url" type="url" placeholder="https://www.tiktok.com/@user/video/..." required>
+      <button type="submit">Znajdź piosenkę</button>
+    </form>
+    <p class="hint">W aplikacji TikTok: <b>Udostępnij → Kopiuj link</b>, potem wklej tutaj.</p>
+    <div id="video-box"></div>
+  </section>
+
+  <section class="panel" id="tab-mic">
+    {% if has_shazam %}
+    <p>Puść urywek z TikToka (np. z telefonu) przy mikrofonie komputera i kliknij przycisk — nagramy ~10 sekund.</p>
+    <button id="btn-rec" class="big">🎙️ Nagrywaj i rozpoznaj</button>
+    <p class="hint">…albo wgraj plik audio/wideo:</p>
+    <input type="file" id="file-in" accept="audio/*,video/*">
+    {% else %}
+    <p class="warn">Rozpoznawanie dźwięku wymaga biblioteki <code>shazamio</code>: <code>pip install shazamio</code></p>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="tab-search">
+    <form id="form-search" class="row">
+      <input id="q" type="text" placeholder="Tytuł, wykonawca lub fragment tekstu…" required>
+      <button type="submit">Szukaj</button>
+    </form>
+  </section>
+
+  <div id="status"></div>
+  <div id="results" class="grid"></div>
+
+  <footer>
+    {% if not has_ffmpeg %}<p class="warn">Brak ffmpeg — dźwięk z TikToka zapisze się w oryginalnym formacie (np. m4a) zamiast MP3.</p>{% endif %}
+    <p>Pełne utwory słuchasz/kupujesz w legalnych serwisach (Spotify, Apple Music, YouTube Music…). Pobieranie dźwięku z TikToka — tylko na własny użytek.</p>
+  </footer>
+</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
