@@ -110,3 +110,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .sheet .meta { color: var(--muted); }
 .m-actions .btn { flex: 1; text-align: center; padding: 14px; font-size: 1rem; }
 .err { color: #ff6b81; }
+#ptr { height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--muted);
+  font-size: .9rem; transition: height .25s ease; }
+html, body { overscroll-behavior-y: contain; }

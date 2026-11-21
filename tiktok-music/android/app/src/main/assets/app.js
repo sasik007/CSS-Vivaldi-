@@ -295,7 +295,9 @@ function showFullLength(song) {
 }
 
 /** Szuka we wszystkich włączonych źródłach. */
+let lastSearch = null, npCalls = 0;
 async function searchAll(q, title = q, fallback = "") {
+  lastSearch = [q, title, fallback];
   lastCatalog = [];
   $("#q").value = q;
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
@@ -317,7 +319,7 @@ async function searchAll(q, title = q, fallback = "") {
   if (src.itunes) parts.push(`${n} w katalogu`);
   if (src.openverse || src.archive) parts.push(`${f} do pobrania`);
   if (n || f) setStatus(`✅ „${title}”: ${parts.join(", ")}`);
-  else setStatus(src.youtube ? "Nic nie znaleziono w katalogu — kliknij ▶ Odtwórz, poszukamy na YouTube." : "Nic nie znaleziono 😕", true);
+  else setStatus(src.youtube ? "Nic nie znaleziono w katalogu — spróbuj 🔎 Szukaj w YouTube." : "Nic nie znaleziono 😕", true);
 }
 
 function storeLinks(s) {
@@ -741,6 +743,7 @@ async function loadCardDetails(url) {
 }
 
 window.handleNowPlaying = async (title, hint = "", dur = 0) => {
+  npCalls++;
   cardKey = title + "|" + hint + "|" + Date.now();
   cardData = null;
   grabForDetailsAt = 0;
@@ -833,3 +836,47 @@ $("#btn-diag").onclick = () => {
   el.textContent = lines.join("\n");
   el.hidden = false;
 };
+
+// --- pociągnij w dół, aby odświeżyć
+const ptr = document.createElement("div");
+ptr.id = "ptr";
+document.body.prepend(ptr);
+let ptrStart = null, ptrPull = 0, refreshing = false;
+const PTR_MAX = 90, PTR_TRIGGER = 60;
+addEventListener("touchstart", (e) => {
+  ptrStart = (scrollY <= 0 && $("#modal").hidden && !refreshing) ? e.touches[0].clientY : null;
+}, { passive: true });
+addEventListener("touchmove", (e) => {
+  if (ptrStart == null) return;
+  ptrPull = e.touches[0].clientY - ptrStart;
+  if (ptrPull <= 0 || scrollY > 0) { ptr.style.height = "0"; return; }
+  e.preventDefault();
+  const h = Math.min(ptrPull * 0.5, PTR_MAX);
+  ptr.style.transition = "none";
+  ptr.style.height = h + "px";
+  ptr.textContent = h >= PTR_TRIGGER ? "↻ Puść, aby odświeżyć" : "↓ Pociągnij, aby odświeżyć";
+}, { passive: false });
+addEventListener("touchend", () => {
+  if (ptrStart == null) return;
+  const h = Math.min(Math.max(ptrPull, 0) * 0.5, PTR_MAX);
+  ptrStart = null; ptrPull = 0;
+  ptr.style.transition = "";
+  if (h >= PTR_TRIGGER) doRefresh(); else ptr.style.height = "0";
+});
+async function doRefresh() {
+  refreshing = true;
+  ptr.textContent = "⏳ Odświeżam…";
+  ptr.style.height = "48px";
+  try {
+    refreshSetup();
+    const before = npCalls;
+    cardData = null;
+    Android.refreshNowPlaying();          // ponownie: co gra na TikToku
+    await new Promise(r => setTimeout(r, 800));
+    if (npCalls === before && lastSearch) await searchAll(...lastSearch);  // albo powtórz ostatnie wyszukiwanie
+  } catch (err) {
+    setStatus("❌ " + err.message, true);
+  } finally {
+    setTimeout(() => { ptr.style.height = "0"; refreshing = false; }, 400);
+  }
+}
