@@ -99,6 +99,7 @@ public class MainActivity extends Activity {
     static final String SHORTCUT_ID = "find_song";
     /** Interfejs ładujemy z wirtualnego adresu https (potrzebne, by działał odtwarzacz YouTube). */
     static final String APP_HOST = "appassets.musicfinder.local";
+    static final Pattern YT_LENGTH = Pattern.compile("\"lengthText\":\\{.{0,300}?\"simpleText\":\"([\\d:]+)\"");
     static final Pattern TT_LINK = Pattern.compile("https?://\\S*tiktok\\.com/\\S+", Pattern.CASE_INSENSITIVE);
 
     private WebView ui;
@@ -814,7 +815,12 @@ public class MainActivity extends Activity {
                         String title;
                         try { title = (String) new JSONTokener("\"" + m.group(2) + "\"").nextValue(); }
                         catch (Exception e) { title = m.group(2); }
-                        arr.put(new JSONObject().put("id", m.group(1)).put("title", title));
+                        JSONObject v = new JSONObject().put("id", m.group(1)).put("title", title);
+                        // długość filmu z tego samego wpisu wyników
+                        String seg = body.substring(m.start(), Math.min(body.length(), m.start() + 8000));
+                        Matcher lm = YT_LENGTH.matcher(seg);
+                        if (lm.find()) v.put("length", lm.group(1));
+                        arr.put(v);
                     }
                     if (arr.length() == 0) throw new IOException("brak wyników");
                     reply(id, true, arr.toString());

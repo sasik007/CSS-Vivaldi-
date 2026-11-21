@@ -94,3 +94,4 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
 .np-actions .btn { flex: 1; text-align: center; }
 #video-box:not(:empty) { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 #video-box .video { margin-top: 0; }
+.muted { color: var(--muted); }

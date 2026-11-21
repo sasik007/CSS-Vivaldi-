@@ -155,8 +155,19 @@ async function downloadFull(btn) {
   }
 }
 
+let lastCatalog = [];
+/** Długość całej piosenki na karcie „Teraz na TikToku” / filmu z linku. */
+function showFullLength(song) {
+  const el = $("#full-len");
+  if (!el) return;
+  el.innerHTML = song && song.duration
+    ? `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">(${esc(song.artist)} — ${esc(song.title)})</small>`
+    : "";
+}
+
 /** Szuka we wszystkich włączonych źródłach. */
 async function searchAll(q, title = q, fallback = "") {
+  lastCatalog = [];
   $("#q").value = q;
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   setStatus("⏳ Szukam pełnej wersji…");
@@ -164,6 +175,8 @@ async function searchAll(q, title = q, fallback = "") {
     let r = await searchSongs(q);
     if (!r.length && fallback) r = await searchSongs(fallback);
     renderResults(r);
+    lastCatalog = r;
+    showFullLength(r[0]);
     return r.length;
   })().catch(() => 0);
   const freeJobs = [];
@@ -241,7 +254,7 @@ function loadYtApi() {
 function ytShow(i) {
   ytIdx = i;
   const v = ytList[i];
-  $("#yt-title").textContent = v.title;
+  $("#yt-title").textContent = v.title + (v.length ? `  ·  ⏱ ${v.length}` : "");
   if (ytPlayer) ytPlayer.loadVideoById(v.id);
   else ytPlayer = new YT.Player("yt", {
     videoId: v.id, width: "100%", height: "100%",
@@ -301,6 +314,7 @@ async function analyze(url) {
           <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
           ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
+          <p id="full-len"></p>
           <div id="file-info"></div>
           <p>${ytButton(ytQuery, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
           <p><button class="btn ghost" data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button></p>
@@ -393,6 +407,7 @@ window.handleNowPlaying = async (title) => {
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
+      <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
       <p>${ytButton(orig ? title : q, orig ? "▶ Odtwórz z YouTube" : undefined)}</p>
       <div class="row np-actions">
         <button class="btn ghost" data-open="${esc(ytSearch(orig ? title : q))}">🔎 Szukaj w YouTube</button>
@@ -406,6 +421,7 @@ window.handleNowPlaying = async (title) => {
   };
   if (orig) return setStatus("To „oryginalny dźwięk” — spróbuj 🎙️ Rozpoznaj albo udostępnij film do aplikacji.", true);
   await searchAll(q, title);
+  if (!lastCatalog.length) showFullLength(null);
 };
 
 // --- baner włączenia wykrywania
