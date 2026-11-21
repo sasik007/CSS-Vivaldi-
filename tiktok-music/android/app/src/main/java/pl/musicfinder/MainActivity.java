@@ -200,6 +200,28 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Gdy TikTok gra obok (okienko / podzielony ekran) — odświeżaj „Teraz na TikToku” na bieżąco. */
+    private final Runnable livePoll = new Runnable() {
+        @Override
+        public void run() {
+            if (System.currentTimeMillis() - lastShareAt > 5000) checkNowPlaying();
+            main.postDelayed(this, 1500);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        main.removeCallbacks(livePoll);
+        main.postDelayed(livePoll, 1500);
+    }
+
+    @Override
+    protected void onStop() {
+        main.removeCallbacks(livePoll);
+        super.onStop();
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -272,9 +294,8 @@ public class MainActivity extends Activity {
         String title = p.getString(TikTokWatcher.KEY_TITLE, "");
         long at = p.getLong(TikTokWatcher.KEY_TIME, 0);
         if (title.isEmpty() || System.currentTimeMillis() - at > 10 * 60_000) return;
-        String key = title + "@" + at;
-        if (key.equals(p.getString("np_shown", ""))) return;
-        p.edit().putString("np_shown", key).apply();
+        if (title.equals(p.getString("np_shown", ""))) return;
+        p.edit().putString("np_shown", title).apply();
         String js = "window.handleNowPlaying(" + JSONObject.quote(title) + ")";
         if (uiReady) ui.evaluateJavascript(js, null); else pendingJs = js;
     }
@@ -806,6 +827,37 @@ public class MainActivity extends Activity {
         public boolean watcherEnabled() {
             String s = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             return s != null && s.contains(getPackageName() + "/");
+        }
+
+        /** Diagnostyka wykrywania: co usługa ostatnio widziała na ekranie TikToka. */
+        @JavascriptInterface
+        public String watcherDebug() {
+            SharedPreferences p = getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE);
+            try {
+                JSONObject o = new JSONObject();
+                o.put("enabled", watcherEnabled());
+                o.put("title", p.getString(TikTokWatcher.KEY_TITLE, ""));
+                o.put("titleAgo", ago(p.getLong(TikTokWatcher.KEY_TIME, 0)));
+                o.put("scanAgo", ago(p.getLong(TikTokWatcher.KEY_DBG_TIME, 0)));
+                String d = p.getString(TikTokWatcher.KEY_DBG, null);
+                if (d != null) o.put("scan", new JSONObject(d));
+                o.put("android", Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")");
+                o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
+                return o.toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+
+        private long ago(long t) { return t == 0 ? -1 : (System.currentTimeMillis() - t) / 1000; }
+
+        /** Wymusza ponowne pokazanie bieżącego dźwięku. */
+        @JavascriptInterface
+        public void refreshNowPlaying() {
+            main.post(() -> {
+                getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE).edit().remove("np_shown").apply();
+                checkNowPlaying();
+            });
         }
 
         @JavascriptInterface

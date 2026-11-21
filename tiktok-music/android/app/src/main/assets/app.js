@@ -405,3 +405,27 @@ $("#btn-setup-hide").onclick = () => {
 refreshSetup();
 
 $("#btn-rec").onclick = () => Android.recognize();
+
+// --- diagnostyka wykrywania
+$("#btn-np").onclick = () => {
+  if (!Android.watcherEnabled()) { $("#setup").hidden = false; setupHidden = false; return Android.openWatcherSettings(); }
+  Android.refreshNowPlaying();
+  setTimeout(() => { if (!$("#video-box").textContent.includes("Teraz na TikToku")) setStatus("Jeszcze nic nie wykryto — włącz film na TikToku i spróbuj ponownie. Jeśli nie działa: 🔧 Diagnostyka.", true); }, 600);
+};
+$("#btn-diag").onclick = () => {
+  const d = JSON.parse(Android.watcherDebug() || "{}"), sc = d.scan || {};
+  const ago = (s) => s < 0 ? "nigdy" : s < 60 ? `${s} s temu` : `${Math.round(s / 60)} min temu`;
+  const lines = [
+    `Usługa włączona: ${d.enabled ? "TAK" : "NIE ← włącz w Ułatwieniach dostępu"}`,
+    `Ostatni odczyt TikToka: ${ago(d.scanAgo)}`,
+    `Wykryty dźwięk: ${d.title ? `„${d.title}” (${ago(d.titleAgo)})` : "brak"}`,
+    `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
+    `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
+    ``,
+    `Napisy widoczne na ekranie TikToka:`,
+    ...((sc.texts || []).map(t => "• " + t)),
+  ];
+  const el = $("#diag");
+  el.textContent = lines.join("\n");
+  el.hidden = false;
+};
