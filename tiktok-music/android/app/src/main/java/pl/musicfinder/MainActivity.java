@@ -1057,6 +1057,12 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** Czy TikTok jest widoczny obok (okienko / podzielony ekran). */
+        @JavascriptInterface
+        public boolean isMultiWindow() {
+            return isInMultiWindowMode();
+        }
+
         /** Automatycznie: TikTok → Udostępnij → Kopiuj link → powrót. false = usługa wyłączona. */
         @JavascriptInterface
         public boolean grabTikTokLink() {

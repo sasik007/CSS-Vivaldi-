@@ -235,10 +235,7 @@ public class TikTokWatcher extends AccessibilityService {
         if (r != null && r.getMax() > 0 && tmp.width() > durWidth) {
             float max = r.getMax();
             rangeDbg = n.getClassName() + " typ=" + r.getType() + " " + r.getCurrent() + "/" + max + " szer=" + tmp.width();
-            if (r.getType() != AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_PERCENT && max > 1) {
-                double sec = max > 1000 ? max / 1000.0 : max;  // ms albo sekundy
-                if (sec >= 1 && sec < 4 * 3600) { durSec = sec; durWidth = tmp.width(); }
-            }
+            // tylko do diagnostyki — wartości paska bywają mylące (np. stałe 10)
         }
         for (CharSequence cs : new CharSequence[]{n.getText(), n.getContentDescription()}) {
             if (cs == null) continue;

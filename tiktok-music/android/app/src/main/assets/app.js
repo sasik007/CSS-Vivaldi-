@@ -19,7 +19,7 @@ function callP(onProgress, method, ...args) {
 }
 
 // --- przełączniki źródeł
-const src = { itunes: true, youtube: true, openverse: true, archive: true };
+const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails: true };
 try { Object.assign(src, JSON.parse(localStorage.getItem("sources") || "{}")); } catch {}
 document.querySelectorAll("[data-src]").forEach(cb => {
   cb.checked = !!src[cb.dataset.src];
@@ -422,7 +422,8 @@ window.grabFailed = () => {
   if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
   setStatus("Nie udało się automatycznie skopiować linku. W TikToku: Udostępnij → Kopiuj link i wróć — pobierze się samo.", true);
 };
-let autoDownloadAt = 0, grabForModalAt = 0;
+let autoDownloadAt = 0, grabForModalAt = 0, grabForDetailsAt = 0;
+let cardData = null, cardKey = "";   // dane filmu z bieżącej karty „Teraz na TikToku”
 
 function isOriginal(m) {
   const t = (m.title || "").toLowerCase();
@@ -538,6 +539,11 @@ $("#btn-paste").onclick = () => {
 window.handleShared = (text) => {
   const m = (text || "").match(TT_RE);
   if (!m) return setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
+  // link skopiowany automatycznie dla danych karty (czas od razu)
+  if (grabForDetailsAt && Date.now() - grabForDetailsAt < 60_000) {
+    grabForDetailsAt = 0;
+    return loadCardDetails(m[0]);
+  }
   // link skopiowany po „Pobierz urywek” z karty → okienko z danymi, karta zostaje bez zmian
   if (grabForModalAt && Date.now() - grabForModalAt < 5 * 60_000) {
     grabForModalAt = 0;
@@ -700,14 +706,48 @@ function originalAuthor(title) {
   return m ? m[1].replace(/[^\p{L}\p{N} _.-]/gu, "").trim() : "";
 }
 
-function tiktokTimeHtml(sec) {
-  return `<span class="badge">⏱ Na TikToku</span>` + (sec > 0
-    ? `<b>${fmt(sec)}</b>`
-    : `<small class="muted">nieznany — dokładny czas pokaże się po „Pobierz urywek”</small>`);
+function tiktokTimeHtml(sec, video) {
+  if (sec > 0) return `<span class="badge">⏱ Na TikToku</span><b>${fmt(sec)}</b> <small class="muted">cały dźwięk${video ? ` · film ${fmt(video)}` : ""}</small>`;
+  if (grabForDetailsAt) return `<span class="badge">⏱ Na TikToku</span><small class="muted">⏳ sprawdzam…</small>`;
+  return `<span class="badge">⏱ Na TikToku</span><button class="btn ghost small" id="tt-check">🔄 Sprawdź</button>`;
 }
-window.updateTikTokTime = (sec) => { const el = $("#tt-len"); if (el) el.innerHTML = tiktokTimeHtml(sec); };
+window.updateTikTokTime = (sec, video) => {
+  const el = $("#tt-len");
+  if (!el) return;
+  el.innerHTML = tiktokTimeHtml(sec, video);
+  const b = $("#tt-check");
+  if (b) b.onclick = () => grabDetails(cardKey);
+};
+
+/** Pobiera dane bieżącego filmu (link przez „Kopiuj link”) — czas od razu na karcie. */
+function grabDetails(key) {
+  if (key !== cardKey || cardData) return;
+  grabForDetailsAt = Date.now();
+  window.updateTikTokTime(0);
+  if (!Android.grabTikTokLink()) { grabForDetailsAt = 0; window.updateTikTokTime(0); }
+}
+async function loadCardDetails(url) {
+  const key = cardKey;
+  try {
+    const d = JSON.parse(await call("tiktok", url));
+    if (key !== cardKey) return;  // w międzyczasie inny film
+    cardData = d;
+    const m = d.music || {};
+    window.updateTikTokTime(m.duration || d.videoDuration || 0, m.duration ? d.videoDuration : 0);
+  } catch (err) {
+    if (key === cardKey) { const el = $("#tt-len"); if (el) el.innerHTML = `<span class="badge">⏱ Na TikToku</span><small class="err">${esc(err.message)}</small> <button class="btn ghost small" id="tt-check">🔄</button>`;
+      const b = $("#tt-check"); if (b) b.onclick = () => grabDetails(cardKey); }
+  }
+}
 
 window.handleNowPlaying = async (title, hint = "", dur = 0) => {
+  cardKey = title + "|" + hint + "|" + Date.now();
+  cardData = null;
+  grabForDetailsAt = 0;
+  const myKey = cardKey;
+  // w okienku obok TikToka: po 1,5 s stabilnego filmu pobierz dane (czas) automatycznie
+  if (src.autodetails && Android.watcherEnabled() && Android.isMultiWindow && Android.isMultiWindow())
+    setTimeout(() => { if (myKey === cardKey && document.visibilityState === "visible" && $("#modal").hidden) grabDetails(myKey); }, 1500);
   showTab("link");
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
@@ -729,7 +769,9 @@ window.handleNowPlaying = async (title, hint = "", dur = 0) => {
       </div>
       ${fullButtonHtml(q)}
     </div></div>`;
+  window.updateTikTokTime(0);
   $("#np-dl").onclick = () => {
+    if (cardData) return openClipModal(null, cardData);  // dane już są — od razu
     grabForModalAt = Date.now();
     const btn = $("#np-dl");
     btn.disabled = true; btn.textContent = "⏳ Pobieram link z TikToka…";
