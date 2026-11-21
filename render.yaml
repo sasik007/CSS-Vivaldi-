@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: music-finder
-    runtime: docker
-    plan: free
-    rootDir: tiktok-music
-    dockerfilePath: ./Dockerfile
-    healthCheckPath: /health

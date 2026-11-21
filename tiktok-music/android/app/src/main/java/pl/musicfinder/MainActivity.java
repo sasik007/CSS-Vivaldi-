@@ -1,122 +1,152 @@
 package pl.musicfinder;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.app.DownloadManager;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.media.MediaCodec;
+import android.media.MediaExtractor;
+import android.media.MediaFormat;
+import android.media.MediaMuxer;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.text.InputType;
-import android.view.View;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.MediaStore;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
-import android.webkit.PermissionRequest;
-import android.webkit.URLUtil;
-import android.webkit.ValueCallback;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.EditText;
-import android.widget.Toast;
+import android.widget.FrameLayout;
+
+import org.json.JSONObject;
+import org.json.JSONTokener;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 /**
- * Music Finder — aplikacja na Androida.
- * Wyświetla serwer Music Finder w WebView, przyjmuje linki udostępnione z TikToka,
- * obsługuje mikrofon (rozpoznawanie), wybór pliku i pobieranie MP3.
+ * Music Finder — działa samodzielnie na telefonie, bez serwera.
+ *
+ * - Interfejs: lokalny HTML (assets/index.html) w WebView.
+ * - Dane z TikToka: ukryta przeglądarka (drugi WebView) otwiera stronę filmu,
+ *   sama przechodzi zabezpieczenia TikToka, a my odczytujemy dane o dźwięku.
+ * - Pobieranie: dźwięk z TikToka trafia do Pobrane/Music Finder.
+ * - Szukanie pełnej wersji: katalog iTunes (bez klucza API).
  */
 public class MainActivity extends Activity {
-    private static final String PREFS = "mf";
-    private static final String KEY_SERVER = "server";
-    private static final int REQ_MIC = 1;
-    private static final int REQ_FILE = 2;
+    static final String DESKTOP_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-    private WebView web;
-    private PermissionRequest pendingPermission;
-    private ValueCallback<Uri[]> fileCallback;
+    /** Wyciąga z otwartej strony TikToka dane filmu i dźwięku. Zwraca JSON albo null (jeszcze nie gotowe). */
+    static final String EXTRACT_JS = "(function(){try{"
+            + "var it=null;"
+            + "var el=document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');"
+            + "if(el){var d=(JSON.parse(el.textContent)||{})['__DEFAULT_SCOPE__']||{};var vd=d['webapp.video-detail'];"
+            + " if(vd){if(vd.itemInfo&&vd.itemInfo.itemStruct)it=vd.itemInfo.itemStruct;"
+            + "  else return JSON.stringify({status:vd.statusCode||-2,msg:vd.statusMsg||''});}}"
+            + "if(!it){var s=document.getElementById('SIGI_STATE')||document.getElementById('sigi-persisted-data');"
+            + " if(s){var j=JSON.parse(s.textContent);var im=j.ItemModule||{};var k=Object.keys(im)[0];if(k)it=im[k];"
+            + "  if(it&&typeof it.music==='string')it.music=(j.MusicModule||{})[it.music]||{};"
+            + "  if(it&&typeof it.author==='string')it.author={uniqueId:it.author};}}"
+            + "if(!it){if(location.pathname.indexOf('/login')===0)return JSON.stringify({status:-3});return null;}"
+            + "var m=it.music||{},v=it.video||{};var pa=v.playAddr;if(Array.isArray(pa))pa=(pa[0]||{}).src;"
+            + "return JSON.stringify({status:0,id:it.id,desc:it.desc,author:(it.author||{}).uniqueId,"
+            + " cover:v.cover||v.originCover,videoUrl:pa||v.downloadAddr||'',page:location.href,"
+            + " music:{title:m.title,author:m.authorName,album:m.album,original:!!m.original,playUrl:m.playUrl||'',"
+            + "  cover:m.coverLarge||m.coverMedium||m.coverThumb,duration:m.duration}});"
+            + "}catch(e){return null;}})()";
 
+    private WebView ui;
+    private WebView scraper;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private boolean uiReady = false;
+    private String pendingShare = null;
+
+    // stan bieżącego odczytu TikToka
+    private int scrapeId = 0;
+    private long scrapeDeadline = 0;
+    private Runnable scrapePoll = null;
+
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        web = new WebView(this);
-        web.setBackgroundColor(0xFF0F0F14);
-        setContentView(web);
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(0xFF0F0F14);
 
-        WebSettings s = web.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setMediaPlaybackRequiresUserGesture(false);
+        CookieManager.getInstance().setAcceptCookie(true);
 
-        web.setWebViewClient(new WebViewClient() {
+        // Ukryta przeglądarka do TikToka (1x1 px, przezroczysta, pod interfejsem)
+        scraper = new WebView(this);
+        WebSettings ss = scraper.getSettings();
+        ss.setJavaScriptEnabled(true);
+        ss.setDomStorageEnabled(true);
+        ss.setUserAgentString(DESKTOP_UA);
+        ss.setBlockNetworkImage(true);
+        ss.setMediaPlaybackRequiresUserGesture(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(scraper, true);
+        scraper.setWebViewClient(new WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                Uri u = req.getUrl();
-                if ("app".equals(u.getScheme())) { askServer(null); return true; }
-                String server = getServer();
-                if (server != null && u.toString().startsWith(server)) return false;
-                // linki do Spotify / YouTube / Apple Music → otwórz w ich aplikacji
-                try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                String s = r.getUrl().getScheme();
+                return !("http".equals(s) || "https".equals(s)); // blokuj przekierowania do aplikacji TikTok
+            }
+        });
+        scraper.setAlpha(0f);
+        root.addView(scraper, new FrameLayout.LayoutParams(1, 1));
+
+        // Interfejs aplikacji
+        ui = new WebView(this);
+        ui.setBackgroundColor(0xFF0F0F14);
+        WebSettings us = ui.getSettings();
+        us.setJavaScriptEnabled(true);
+        us.setDomStorageEnabled(true);
+        ui.addJavascriptInterface(new Bridge(), "Android");
+        ui.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                if ("file".equals(r.getUrl().getScheme())) return false;
+                openExternal(r.getUrl().toString());
                 return true;
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
-                if (req.isForMainFrame()) {
-                    view.loadData(offlinePage(), "text/html; charset=utf-8", "UTF-8");
-                }
+            public void onPageFinished(WebView v, String url) {
+                uiReady = true;
+                if (pendingShare != null) { deliverShare(pendingShare); pendingShare = null; }
             }
         });
+        root.addView(ui, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        setContentView(root);
 
-        web.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public void onPermissionRequest(PermissionRequest request) {
-                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                    request.grant(request.getResources());
-                } else {
-                    pendingPermission = request;
-                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
-                }
-            }
+        ui.loadUrl("file:///android_asset/index.html");
+        handleIntent(getIntent());
 
-            @Override
-            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
-                if (fileCallback != null) fileCallback.onReceiveValue(null);
-                fileCallback = cb;
-                try {
-                    startActivityForResult(params.createIntent(), REQ_FILE);
-                } catch (Exception e) {
-                    fileCallback = null;
-                    return false;
-                }
-                return true;
-            }
-        });
-
-        web.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) -> {
-            String name = URLUtil.guessFileName(url, contentDisposition, "audio/mpeg");
-            if (contentDisposition != null && contentDisposition.contains("filename*=UTF-8''")) {
-                name = Uri.decode(contentDisposition.substring(contentDisposition.indexOf("''") + 2).replace("\"", ""));
-            }
-            DownloadManager.Request r = new DownloadManager.Request(Uri.parse(url));
-            r.addRequestHeader("User-Agent", userAgent);
-            String cookies = CookieManager.getInstance().getCookie(url);
-            if (cookies != null) r.addRequestHeader("Cookie", cookies);
-            r.setTitle(name);
-            r.setDescription("Music Finder");
-            r.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            r.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
-            ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(r);
-            Toast.makeText(this, "Pobieram do folderu Pobrane… (może potrwać kilka sekund)", Toast.LENGTH_LONG).show();
-        });
-
-        if (getServer() == null) askServer(getIntent());
-        else handleIntent(getIntent());
+        if (Build.VERSION.SDK_INT < 29
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
+        }
     }
 
     @Override
@@ -126,88 +156,313 @@ public class MainActivity extends Activity {
         handleIntent(intent);
     }
 
+    /** TikTok → Udostępnij → Music Finder */
     private void handleIntent(Intent intent) {
-        String server = getServer();
-        if (server == null) { askServer(intent); return; }
-        if (intent != null && Intent.ACTION_SEND.equals(intent.getAction())) {
-            String text = intent.getStringExtra(Intent.EXTRA_TEXT);
-            if (text == null) text = "";
-            web.loadUrl(server + "/share?text=" + Uri.encode(text));
-        } else if (web.getUrl() == null || web.getUrl().startsWith("data:")) {
-            web.loadUrl(server + "/");
+        if (intent == null || !Intent.ACTION_SEND.equals(intent.getAction())) return;
+        String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        if (text == null) return;
+        if (uiReady) deliverShare(text); else pendingShare = text;
+    }
+
+    private void deliverShare(String text) {
+        ui.evaluateJavascript("window.handleShared(" + JSONObject.quote(text) + ")", null);
+    }
+
+    private void reply(int id, boolean ok, String text) {
+        main.post(() -> ui.evaluateJavascript(
+                "window.__cb(" + id + "," + ok + "," + JSONObject.quote(text == null ? "" : text) + ")", null));
+    }
+
+    private void openExternal(String url) {
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception ignored) { }
+    }
+
+    // ------------------------------------------------------------------ TikTok
+
+    private void startScrape(int id, String url) {
+        if (scrapePoll != null) {  // anuluj poprzedni odczyt
+            main.removeCallbacks(scrapePoll);
+            reply(scrapeId, false, "Anulowano");
         }
-    }
-
-    private String getServer() {
-        SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
-        String s = p.getString(KEY_SERVER, null);
-        if ((s == null || s.isEmpty()) && !BuildConfig.DEFAULT_SERVER.isEmpty()) s = BuildConfig.DEFAULT_SERVER;
-        if (s == null || s.isEmpty()) return null;
-        return s.replaceAll("/+$", "");
-    }
-
-    private void askServer(Intent after) {
-        EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        input.setHint("https://music-finder-xxxx.onrender.com");
-        String cur = getServer();
-        if (cur != null) input.setText(cur);
-        int pad = (int) (20 * getResources().getDisplayMetrics().density);
-        input.setPadding(pad, pad, pad, pad);
-
-        new AlertDialog.Builder(this)
-                .setTitle("Adres serwera")
-                .setMessage("Wpisz adres swojego serwera Music Finder (z Render.com albo komputera w domu, np. http://192.168.1.10:5000).")
-                .setView(input)
-                .setCancelable(false)
-                .setPositiveButton("Zapisz", (d, w) -> {
-                    String v = input.getText().toString().trim();
-                    if (!v.isEmpty() && !v.startsWith("http")) v = "https://" + v;
-                    if (v.isEmpty()) { askServer(after); return; }
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_SERVER, v).apply();
-                    web.loadUrl("about:blank");
-                    if (after != null && Intent.ACTION_SEND.equals(after.getAction())) handleIntent(after);
-                    else web.loadUrl(getServer() + "/");
-                })
-                .show();
-    }
-
-    private String offlinePage() {
-        return "<html><body style='background:#0f0f14;color:#eee;font-family:sans-serif;padding:24px'>"
-                + "<h2>Brak połączenia z serwerem</h2>"
-                + "<p>Serwer: " + getServer() + "</p>"
-                + "<p>Darmowy serwer na Render.com „zasypia” — pierwsze uruchomienie może trwać do minuty. "
-                + "Sprawdź internet i spróbuj ponownie.</p>"
-                + "<p><a style='color:#f0506e' href='" + getServer() + "/'>↻ Spróbuj ponownie</a></p>"
-                + "<p><a style='color:#a77bff' href='app://server'>⚙ Zmień adres serwera</a></p>"
-                + "</body></html>";
-    }
-
-    @Override
-    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
-        if (code == REQ_MIC && pendingPermission != null) {
-            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-                pendingPermission.grant(pendingPermission.getResources());
-            } else {
-                pendingPermission.deny();
+        scrapeId = id;
+        scrapeDeadline = System.currentTimeMillis() + 30_000;
+        scraper.stopLoading();
+        scraper.loadUrl(url);
+        scrapePoll = new Runnable() {
+            @Override
+            public void run() {
+                scraper.evaluateJavascript(EXTRACT_JS, res -> {
+                    if (scrapePoll != this) return;
+                    String json = decodeJsResult(res);
+                    if (json != null) {
+                        finishScrape();
+                        try {
+                            JSONObject o = new JSONObject(json);
+                            int st = o.optInt("status", -1);
+                            if (st == 0) reply(id, true, json);
+                            else if (st == -3) reply(id, false, "TikTok wymaga zalogowania, żeby zobaczyć ten film.");
+                            else reply(id, false, "Film niedostępny (prywatny, usunięty lub z ograniczeniem wieku). Kod: " + st);
+                        } catch (Exception e) {
+                            reply(id, false, "Nie udało się odczytać danych filmu.");
+                        }
+                    } else if (System.currentTimeMillis() > scrapeDeadline) {
+                        finishScrape();
+                        reply(id, false, "TikTok nie odpowiedział. Sprawdź internet i spróbuj ponownie.");
+                    } else {
+                        main.postDelayed(this, 700);
+                    }
+                });
             }
-            pendingPermission = null;
+        };
+        main.postDelayed(scrapePoll, 1500);
+    }
+
+    private void finishScrape() {
+        if (scrapePoll != null) main.removeCallbacks(scrapePoll);
+        scrapePoll = null;
+        scraper.stopLoading();
+        scraper.loadUrl("about:blank");
+        CookieManager.getInstance().flush();
+    }
+
+    /** evaluateJavascript zwraca wynik zakodowany jako JSON (np. "\"{...}\"" albo "null"). */
+    private static String decodeJsResult(String res) {
+        if (res == null || res.equals("null")) return null;
+        try {
+            Object v = new JSONTokener(res).nextValue();
+            return v instanceof String ? (String) v : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
-    @Override
-    protected void onActivityResult(int code, int result, Intent data) {
-        if (code == REQ_FILE && fileCallback != null) {
-            fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result, data));
-            fileCallback = null;
-            return;
+    // ------------------------------------------------------------------ HTTP
+
+    private static HttpURLConnection open(String url, String referer) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(15_000);
+        c.setReadTimeout(30_000);
+        c.setInstanceFollowRedirects(true);
+        c.setRequestProperty("User-Agent", DESKTOP_UA);
+        if (referer != null) c.setRequestProperty("Referer", referer);
+        String cookies = CookieManager.getInstance().getCookie(url);
+        if (cookies != null && !cookies.isEmpty()) c.setRequestProperty("Cookie", cookies);
+        return c;
+    }
+
+    private static String readAll(InputStream in) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[16384];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        return out.toString(StandardCharsets.UTF_8.name());
+    }
+
+    /** Pobiera plik do cache. Zwraca {plik, content-type}. */
+    private File fetchToFile(String url, String name) throws IOException {
+        HttpURLConnection c = open(url, "https://www.tiktok.com/");
+        int code = c.getResponseCode();
+        if (code >= 400) throw new IOException("HTTP " + code);
+        File f = new File(getCacheDir(), name);
+        try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(f)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        } finally {
+            c.disconnect();
         }
-        super.onActivityResult(code, result, data);
+        if (f.length() < 1024) throw new IOException("Pusty plik");
+        return f;
+    }
+
+    // ------------------------------------------------------------------ pobieranie
+
+    private String doDownload(String audioUrl, String videoUrl, String baseName) throws Exception {
+        File out = null;
+        String ext = "m4a", mime = "audio/mp4";
+
+        // 1) gotowy plik dźwięku TikToka (zwykle MP3)
+        if (audioUrl != null && !audioUrl.isEmpty()) {
+            try {
+                File f = fetchToFile(audioUrl, "sound.bin");
+                if (isMp3(f)) { ext = "mp3"; mime = "audio/mpeg"; }
+                else { File m4a = new File(getCacheDir(), "sound.m4a"); extractAudio(f, m4a); f.delete(); f = m4a; }
+                out = f;
+            } catch (Exception e) {
+                out = null;
+            }
+        }
+        // 2) wideo → wycięcie ścieżki dźwiękowej (bez ponownego kodowania)
+        if (out == null && videoUrl != null && !videoUrl.isEmpty()) {
+            File video = fetchToFile(videoUrl, "video.mp4");
+            File m4a = new File(getCacheDir(), "sound.m4a");
+            extractAudio(video, m4a);
+            video.delete();
+            out = m4a;
+            ext = "m4a"; mime = "audio/mp4";
+        }
+        if (out == null) throw new IOException("Brak pliku dźwięku do pobrania");
+
+        String fileName = baseName + "." + ext;
+        saveToDownloads(out, fileName, mime);
+        out.delete();
+        return "Zapisano: Pobrane/Music Finder/" + fileName;
+    }
+
+    private static boolean isMp3(File f) throws IOException {
+        byte[] h = new byte[3];
+        try (InputStream in = new FileInputStream(f)) {
+            if (in.read(h) < 3) return false;
+        }
+        return (h[0] == 'I' && h[1] == 'D' && h[2] == '3') || ((h[0] & 0xFF) == 0xFF && (h[1] & 0xE0) == 0xE0);
+    }
+
+    /** Kopiuje ścieżkę audio z pliku MP4 do osobnego pliku M4A. */
+    private static void extractAudio(File src, File dst) throws IOException {
+        MediaExtractor ex = new MediaExtractor();
+        MediaMuxer mux = null;
+        try {
+            ex.setDataSource(src.getAbsolutePath());
+            int track = -1;
+            for (int i = 0; i < ex.getTrackCount(); i++) {
+                String mime = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME);
+                if (mime != null && mime.startsWith("audio/")) { track = i; break; }
+            }
+            if (track < 0) throw new IOException("Film nie ma ścieżki dźwiękowej");
+            ex.selectTrack(track);
+            MediaFormat fmt = ex.getTrackFormat(track);
+            mux = new MediaMuxer(dst.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+            int t = mux.addTrack(fmt);
+            mux.start();
+            ByteBuffer buf = ByteBuffer.allocate(1 << 20);
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            while (true) {
+                int n = ex.readSampleData(buf, 0);
+                if (n < 0) break;
+                info.offset = 0;
+                info.size = n;
+                info.presentationTimeUs = ex.getSampleTime();
+                info.flags = (ex.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0 ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0;
+                mux.writeSampleData(t, buf, info);
+                ex.advance();
+            }
+            mux.stop();
+        } finally {
+            if (mux != null) try { mux.release(); } catch (Exception ignored) { }
+            ex.release();
+        }
+    }
+
+    private void saveToDownloads(File src, String name, String mime) throws IOException {
+        if (Build.VERSION.SDK_INT >= 29) {
+            ContentResolver cr = getContentResolver();
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+            v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+            v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Music Finder");
+            Uri uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new IOException("Nie można utworzyć pliku");
+            try (InputStream in = new FileInputStream(src); OutputStream out = cr.openOutputStream(uri)) {
+                copy(in, out);
+            }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Music Finder");
+            if (!dir.exists() && !dir.mkdirs()) throw new IOException("Brak dostępu do folderu Pobrane");
+            File dst = new File(dir, name);
+            try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
+                copy(in, out);
+            }
+            MediaScannerConnection.scanFile(this, new String[]{dst.getAbsolutePath()}, new String[]{mime}, null);
+        }
+    }
+
+    private static void copy(InputStream in, OutputStream out) throws IOException {
+        if (out == null) throw new IOException("Brak dostępu do pliku");
+        byte[] buf = new byte[65536];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+    }
+
+    // ------------------------------------------------------------------ most JS ↔ Java
+
+    class Bridge {
+        @JavascriptInterface
+        public void tiktok(int id, String url) {
+            main.post(() -> startScrape(id, url));
+        }
+
+        @JavascriptInterface
+        public void httpGet(int id, String url) {
+            new Thread(() -> {
+                try {
+                    HttpURLConnection c = open(url, null);
+                    int code = c.getResponseCode();
+                    if (code >= 400) throw new IOException("HTTP " + code);
+                    String body;
+                    try (InputStream in = c.getInputStream()) { body = readAll(in); }
+                    reply(id, true, body);
+                } catch (Exception e) {
+                    reply(id, false, "Brak połączenia z internetem (" + e.getMessage() + ")");
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void download(int id, String audioUrl, String videoUrl, String baseName) {
+            new Thread(() -> {
+                try {
+                    reply(id, true, doDownload(audioUrl, videoUrl, baseName));
+                } catch (Exception e) {
+                    reply(id, false, "Pobieranie nie powiodło się: " + e.getMessage());
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public String clipboard() {
+            ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            ClipData clip = cm == null ? null : cm.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return "";
+            CharSequence t = clip.getItemAt(0).coerceToText(MainActivity.this);
+            return t == null ? "" : t.toString();
+        }
+
+        @JavascriptInterface
+        public void openUrl(String url) {
+            main.post(() -> openExternal(url));
+        }
+
+        @JavascriptInterface
+        public void recognize() {
+            main.post(() -> {
+                Intent shazam = getPackageManager().getLaunchIntentForPackage("com.shazam.android");
+                Intent[] tries = {
+                        shazam,
+                        new Intent("com.google.android.googlequicksearchbox.MUSIC_SEARCH"),
+                        new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.shazam.android")),
+                        new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=com.shazam.android")),
+                };
+                for (Intent i : tries) {
+                    if (i == null) continue;
+                    try { startActivity(i); return; } catch (Exception ignored) { }
+                }
+            });
+        }
     }
 
     @Override
     public void onBackPressed() {
-        if (web.canGoBack()) web.goBack();
+        if (ui.canGoBack()) ui.goBack();
         else super.onBackPressed();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (scrapePoll != null) main.removeCallbacks(scrapePoll);
+        scraper.destroy();
+        ui.destroy();
+        super.onDestroy();
     }
 }

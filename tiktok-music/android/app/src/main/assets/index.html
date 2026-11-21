@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Music Finder</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>🎵 Music Finder</h1>
+    <p class="sub">Urywek z TikToka → cała piosenka.</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="link">🔗 TikTok</button>
+    <button class="tab" data-tab="search">🔍 Szukaj</button>
+    <button class="tab" data-tab="mic">🎙️ Rozpoznaj</button>
+  </nav>
+
+  <section class="panel active" id="tab-link">
+    <form id="form-link" class="row">
+      <input id="tt-url" type="url" inputmode="url" placeholder="Link do filmu z TikToka" required>
+      <button type="button" id="btn-paste" class="btn ghost">📋 Wklej</button>
+      <button type="submit" id="btn-find">Znajdź</button>
+    </form>
+    <p class="hint">Najszybciej: w TikToku <b>Udostępnij → Music Finder</b>. Albo <b>Kopiuj link</b> i kliknij 📋 Wklej.</p>
+    <div id="video-box"></div>
+  </section>
+
+  <section class="panel" id="tab-search">
+    <form id="form-search" class="row">
+      <input id="q" type="text" placeholder="Tytuł, wykonawca…" required>
+      <button type="submit">Szukaj</button>
+    </form>
+  </section>
+
+  <section class="panel" id="tab-mic">
+    <p>Gdy na TikToku leci „oryginalny dźwięk” bez nazwy, puść urywek i rozpoznaj go:</p>
+    <button id="btn-rec" class="big">🎙️ Rozpoznaj piosenkę</button>
+    <p class="hint">Otworzy Shazam (jeśli masz) albo wyszukiwanie piosenek Google. Potem wpisz tytuł w 🔍 Szukaj.</p>
+  </section>
+
+  <div id="status"></div>
+  <div id="results" class="grid"></div>
+
+  <footer>
+    <p>Całych piosenek słuchasz w Spotify, YouTube Music, Apple Music… Dźwięk z TikToka pobieraj tylko na własny użytek.</p>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

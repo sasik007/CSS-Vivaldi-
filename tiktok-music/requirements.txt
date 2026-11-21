@@ -1,4 +1,0 @@
-flask>=3.0
-yt-dlp>=2025.1.1
-shazamio>=0.7
-gunicorn>=22
