@@ -149,8 +149,9 @@ public class TikTokWatcher extends AccessibilityService {
     private String hint;
     private final List<String> captions = new ArrayList<>();
     private static final Pattern UI_TEXT = Pattern.compile(
-            "^(zobacz tłumaczenie|więcej|mniej|obserwuj|obserwowani|polub|udostępnij|dodaj komentarz|wyszukiwanie|"
-            + "dla ciebie|profil|see translation|more|follow|like|share|add comment|search|teraz live|live)",
+            "^(zobacz tłumaczenie|więcej|mniej|obserwuj|obserwowani|polub|udostępnij|dodaj komentarz|"
+            + "dla ciebie|profil|see translation|more|follow|like|share|add comment|teraz live|live|"
+            + "obejmuje multimedia|contains ai|osób opublikowało|people posted)",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final Rect win = new Rect();
     private final Rect tmp = new Rect();
@@ -249,7 +250,7 @@ public class TikTokWatcher extends AccessibilityService {
         // opis filmu z hashtagami (pierwszy widoczny na ekranie)
         if (onScreen && hint == null && s.indexOf('#') >= 0 && s.length() < 250) hint = s;
         // napisy w dolnej części filmu (opis, nazwa autora) — często zawierają „Wykonawca – Tytuł”
-        if (onScreen && captions.size() < 6 && s.length() >= 6 && s.length() < 250
+        if (onScreen && captions.size() < 8 && s.length() >= 6 && s.length() < 250
                 && tmp.centerY() > win.top + win.height() * 0.55
                 && !UI_TEXT.matcher(s).find() && !s.matches("[\\d\\s.,]+(tys\\.|mln|k|m)?")
                 && !captions.contains(s)) captions.add(s);

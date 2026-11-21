@@ -188,9 +188,17 @@ function isSameSong(f, t) {
   return !!fa && (fa.includes(ta) || ta.includes(fa) || ta.split(" ").some(w => w.length > 2 && fa.split(" ").includes(w)));
 }
 
+let lastTarget = null;
+/** Wynik z katalogu tylko jeśli to naprawdę ta piosenka (tytuł/wykonawca się zgadzają). */
+function verifiedBest(t) {
+  if (!t || !t.title) return null;
+  return lastCatalog.find(r => isSameSong(r, t) || (t.artist && isSameSong(r, { title: t.artist, artist: t.title }))) || null;
+}
+
 /** Czas + przycisk „Pobierz cały” na karcie (Teraz na TikToku / film z linku). */
 async function updateFullUI(target, ytQuery) {
-  const best = lastCatalog[0];
+  lastTarget = target;
+  const best = verifiedBest(target);
   const t = best ? { title: best.title, artist: best.artist } : target;
   const match = t && t.title ? lastFree.find(f => f.url && isSameSong(f, t)) : null;
 
@@ -440,18 +448,19 @@ async function analyze(url) {
     const autoDl = canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000;
     if (autoDl) autoDownloadAt = 0;
 
-    if (orig) {
-      // „oryginalny dźwięk” — spróbuj po hashtagach z opisu filmu
-      const ph = parseHint(d.desc);
-      const hq = ph.q;
-      current.hint = hq;
+    const ph = parseHint(d.desc);
+    const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
+    if (useCap) {
+      current.hint = ph.q;
       current.hintTag = ph;
-      if (hq) await searchAll(hq, `${hq} (z opisu filmu)`);
-      else setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
+      $("#full-len").insertAdjacentHTML("beforebegin", `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>`);
+      await searchAll(ph.q, ph.raw || ph.q);
+    } else if (orig) {
+      setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
     } else {
       await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
     }
-    await updateFullUI(orig ? { title: (current.hintTag || {}).title || "", artist: (current.hintTag || {}).artist || "" } : { title: m.title, artist: m.author }, ytQuery);
+    await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : orig ? null : { title: m.title, artist: m.author }, useCap ? ph.q : ytQuery);
     // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
     if (autoDl) downloadCurrent();
   } catch (err) {
@@ -464,10 +473,10 @@ async function analyze(url) {
 /** Prawdziwy tytuł i wykonawca do nazwy pliku i tagów (zamiast „TikTok”). */
 function songTag(d) {
   const m = d.music || {};
-  if (!isOriginal(m)) return { title: m.title, artist: m.author || "" };
-  const best = lastCatalog[0];
+  const best = verifiedBest(lastTarget);
   if (best) return { title: best.title, artist: best.artist };
   if (d.hintTag && d.hintTag.title) return { title: d.hintTag.title, artist: d.hintTag.artist };
+  if (!isOriginal(m)) return { title: m.title, artist: m.author || "" };
   return { title: m.title || "Oryginalny dźwięk", artist: m.author || d.author || "" };
 }
 
@@ -532,20 +541,48 @@ $("#btn-yt").onclick = () => {
 // --- „Teraz na TikToku” (z usługi wykrywania)
 // Hashtagi z opisu → podpowiedź tytułu („#SonicRush #DanceMusic” → „Sonic Rush”)
 const GENERIC_TAGS = /^(fyp|fy|foryou|foryoupage|fypシ|viral|trend|trending|dlaciebie|dc|xyzbca|music|muzyka|dance|dancemusic|song|remix|edit|capcut|tiktok|polska|pl|funny|love|explore|viralvideo|parati|pourtoi)$/i;
-/** Z opisu filmu: najpierw wzór „Wykonawca – Tytuł”, potem hashtagi. */
+const SEARCH_HINT = /^(?:wyszukiwanie|search|szukaj|wyszukaj)\s*[·•:|]\s*(.{2,80})$/i;
+const COVER_TAG = /\((?:cover|remix|live|acoustic|official[^)]*|sped up|slowed[^)]*|nightcore|karaoke)\)|\b(?:cover|remix)\b/gi;
+const stripEmoji = (t) => t.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Tytuł piosenki z napisów TikToka, w kolejności pewności:
+ * 1) podpowiedź TikToka „Wyszukiwanie · …”  2) „Wykonawca – Tytuł”
+ * 3) linia z „(cover)/(remix)” albo w cudzysłowie, „Song: …”, „… by …”  4) hashtagi
+ */
 function parseHint(hint) {
-  for (let line of (hint || "").split(/\n/)) {
-    line = line.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, " ").split(/\s[|•]\s|…|\.\.\./)[0].replace(/#\S+/g, "").trim();
+  const lines = (hint || "").split(/\n/).map(stripEmoji).filter(Boolean);
+  for (const l of lines) {
+    const m = l.match(SEARCH_HINT);
+    if (m) { const t = m[1].trim(); return { q: t, artist: "", title: t, raw: t, from: "TikTok podpowiada" }; }
+  }
+  for (let line of lines) {
+    line = line.split(/\s[|•]\s|…|\.\.\./)[0].replace(/#\S+/g, "").trim();
     const m = line.match(/^(.{2,60}?)\s+[–—-]\s+(.{2,60}?)\s*$/);
     if (m && !/^@/.test(m[1])) {
-      const artist = m[1].trim(), title = m[2].replace(/["“”„]/g, "").trim();
-      return { q: `${artist.replace(/\b(feat|ft)\.?.*$/i, "").trim()} ${title}`, artist, title };
+      const artist = m[1].trim(), title = m[2].replace(/["“”„]/g, "").replace(COVER_TAG, "").trim();
+      return { q: `${artist.replace(/\b(feat|ft)\.?.*$/i, "").trim()} ${title}`, artist, title, raw: `${artist} – ${m[2].trim()}`, from: "Z opisu filmu" };
+    }
+  }
+  for (let line of lines) {
+    line = line.split(/\s[|•]\s|…/)[0].replace(/#\S+/g, "").trim();
+    let t = null, artist = "";
+    let m;
+    if ((m = line.match(/^(?:song|piosenka|utwór|track|muzyka|music|🎵)\s*[:：-]\s*(.{2,80})$/i))) t = m[1];
+    else if ((m = line.match(/^(.{2,60}?)\s+by\s+(.{2,40})$/i))) { t = m[1]; artist = m[2]; }
+    else if ((m = line.match(/[„"“]([^„"“”]{2,60})[”"]/))) t = m[1];
+    else if (COVER_TAG.test(line)) t = line;
+    COVER_TAG.lastIndex = 0;
+    if (t) {
+      t = t.replace(COVER_TAG, "").replace(/\s+/g, " ").trim();
+      COVER_TAG.lastIndex = 0;
+      if (t.length >= 2) return { q: `${artist} ${t}`.trim(), artist: artist.trim(), title: t, raw: line, from: "Z opisu filmu" };
     }
   }
   const tags = [...(hint || "").matchAll(/#([\p{L}\p{N}_]+)/gu)].map(m => m[1]).filter(t => !GENERIC_TAGS.test(t));
   const words = tags.slice(0, 2).map(t => t.replace(/_/g, " ").replace(/([a-ząćęłńóśźż])([A-ZĄĆĘŁŃÓŚŹŻ])/g, "$1 $2"));
   const q = words.join(" ").trim();
-  return { q, artist: "", title: q };
+  return { q, artist: "", title: q, raw: words.join(", "), from: "Z hashtagów" };
 }
 function hintQuery(hint) { return parseHint(hint).q; }
 function originalAuthor(title) {
@@ -557,13 +594,16 @@ window.handleNowPlaying = async (title, hint = "") => {
   showTab("link");
   resultsEl.innerHTML = ""; $("#free").innerHTML = "";
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
-  const ph = orig ? parseHint(hint) : null;
-  const hq = ph ? ph.q : "";
-  const q = orig ? (hq || originalAuthor(title) || title) : title.replace(/\s+-\s+/g, " ");
+  const ph = parseHint(hint);
+  // napisy z TikToka mają pierwszeństwo (hashtagi tylko przy „oryginalnym dźwięku”)
+  const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
+  const hq = useCap ? ph.q : "";
+  const q = useCap ? ph.q : orig ? (originalAuthor(title) || title) : title.replace(/\s+-\s+/g, " ");
   $("#video-box").innerHTML = `
     <div class="video"><div class="info">
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
-      ${orig ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.${hq ? ` Z opisu filmu: <b>${esc(ph.artist ? ph.artist + " – " + ph.title : hq)}</b>` : ""}</p>` : ""}
+      ${orig && !useCap ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.</p>` : ""}
+      ${useCap ? `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>` : ""}
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
       <div class="row np-actions">
         <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
@@ -589,7 +629,7 @@ window.handleNowPlaying = async (title, hint = "") => {
   }
   await searchAll(q, title);
   const parts = title.split(/\s+-\s+/);
-  await updateFullUI(orig ? { title: ph.title, artist: ph.artist } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
+  await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
 };
 
 // --- baner włączenia wykrywania
