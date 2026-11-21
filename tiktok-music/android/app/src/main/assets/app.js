@@ -65,13 +65,21 @@ function ccName(code, ver) {
   if (code === "pdm") return "Domena publiczna";
   return `CC ${code.toUpperCase()}${ver ? " " + ver : ""}`;
 }
+const LOSSLESS = /flac|wav|aiff?|alac/i;
+/** Najlepszy wariant pliku: bezstratny > najwyższy bitrate. */
+function bestVariant(r) {
+  const all = [{ url: r.url, filetype: r.filetype, bit_rate: r.bit_rate }, ...(r.alt_files || [])].filter(f => f && f.url);
+  const score = f => (LOSSLESS.test(f.filetype || "") ? 1e7 : 0) + (f.bit_rate || 0);
+  return all.sort((x, y) => score(y) - score(x))[0];
+}
 async function searchOpenverse(q) {
   const url = "https://api.openverse.org/v1/audio/?" + new URLSearchParams({ q, page_size: 12 });
   const data = JSON.parse(await call("httpGet", url));
-  return (data.results || []).filter(r => r.url).map(r => ({
+  return (data.results || []).filter(r => r.url).map(r => ({ ...r, ...bestVariant(r) })).map(r => ({
     kind: "file", title: r.title, artist: r.creator, source: SOURCE_NAMES[r.source] || r.source || r.provider,
     license: ccName(r.license, r.license_version), licenseUrl: r.license_url,
-    url: r.url, format: (r.filetype || "").toUpperCase(), duration: (r.duration || 0) / 1000,
+    url: r.url, format: (r.filetype || "").toUpperCase() + (r.bit_rate ? ` · ${Math.round(r.bit_rate / 1000)} kbps` : "") + (LOSSLESS.test(r.filetype || "") ? " (bezstratny)" : ""),
+    duration: (r.duration || 0) / 1000,
     cover: r.thumbnail, page: r.foreign_landing_url,
   }));
 }
@@ -130,13 +138,23 @@ async function showArchiveTracks(btn) {
   btn.disabled = true; box.textContent = "⏳ Wczytuję utwory…";
   try {
     const meta = JSON.parse(await call("httpGet", "https://archive.org/metadata/" + encodeURIComponent(id)));
-    const seen = new Set();
-    const files = (meta.files || []).filter(f => /mp3/i.test(f.format || "") && !seen.has(f.title || f.name) && seen.add(f.title || f.name)).slice(0, 40);
-    if (!files.length) { box.textContent = "Brak plików MP3 w tej pozycji."; return; }
+    // najlepszy format każdego utworu: FLAC > VBR MP3 > 320 kbps > 256 > 192 > 128 > inne MP3/OGG
+    const rank = f => { const x = (f.format || "").toLowerCase();
+      return x.includes("flac") ? 100 : x === "vbr mp3" ? 90 : x.includes("320") ? 80 : x.includes("256") ? 70
+        : x.includes("192") ? 60 : x.includes("128") ? 40 : x.includes("mp3") ? 30 : x.includes("ogg") ? 20 : 0; };
+    const byTrack = new Map();
+    for (const f of meta.files || []) {
+      if (!rank(f) || /^(spectrogram|png|jpeg)/i.test(f.format || "")) continue;
+      const key = (f.title || f.name.replace(/\.[^.]+$/, "")).toLowerCase();
+      const cur = byTrack.get(key);
+      if (!cur || rank(f) > rank(cur)) byTrack.set(key, f);
+    }
+    const files = [...byTrack.values()].slice(0, 40);
+    if (!files.length) { box.textContent = "Brak plików audio w tej pozycji."; return; }
     const artist = [].concat((meta.metadata || {}).creator || "").join(", ");
     box.innerHTML = `<ol class="tracks">` + files.map(f => {
-      const len = parseLen(f.length), t = f.title || f.name.replace(/\.mp3$/i, "");
-      return `<li><span>${esc(t)}${len ? ` <small>${fmt(len)}</small>` : ""}</span>
+      const len = parseLen(f.length), t = f.title || f.name.replace(/\.[^.]+$/, "");
+      return `<li><span>${esc(t)}${len ? ` <small>${fmt(len)}</small>` : ""} <small>· ${esc(f.format)}</small></span>
         ${dlButton(`https://archive.org/download/${encodeURIComponent(id)}/${encodeURIComponent(f.name)}`, `${artist ? artist + " - " : ""}${t}`)}</li>`;
     }).join("") + `</ol>`;
   } catch (err) { box.textContent = "❌ " + err.message; btn.disabled = false; }

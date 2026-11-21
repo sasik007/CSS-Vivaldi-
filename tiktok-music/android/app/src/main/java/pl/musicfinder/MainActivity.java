@@ -462,35 +462,51 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ pobieranie
 
     private String doDownload(String audioUrl, String videoUrl, String baseName, String title, String artist, Job job) throws Exception {
-        File out = null;
-        String ext = "m4a", mime = "audio/mp4";
-
-        // 1) gotowy plik dźwięku TikToka (zwykle MP3)
+        // Najwyższa jakość: pobieramy obie wersje dźwięku TikToka (osobny plik dźwięku i ścieżkę z filmu),
+        // porównujemy bitrate i zostawiamy lepszą. Bez ponownego kodowania — jakość źródła 1:1.
+        File a = null, v = null;
         if (audioUrl != null && !audioUrl.isEmpty()) {
             try {
+                job.stage("Pobieram dźwięk…");
                 File f = fetchToFile(audioUrl, "sound.bin", job);
-                if (isMp3(f)) { ext = "mp3"; mime = "audio/mpeg"; }
-                else {
-                    job.stage("Wycinam dźwięk…");
-                    File m4a = new File(getCacheDir(), job.tmp("sound.m4a"));
-                    extractAudio(f, m4a); f.delete(); f = m4a;
+                if (!isMp3(f)) {
+                    File m4a = new File(getCacheDir(), job.tmp("sound-a.m4a"));
+                    extractAudio(f, m4a);
+                    f.delete();
+                    f = m4a;
                 }
-                out = f;
+                a = f;
+            } catch (Exception ignored) { }
+        }
+        if (videoUrl != null && !videoUrl.isEmpty()) {
+            try {
+                job.stage("Pobieram ścieżkę z filmu…");
+                File video = fetchToFile(videoUrl, "video.mp4", job);
+                job.stage("Wycinam dźwięk z filmu…");
+                File m4a = new File(getCacheDir(), job.tmp("sound-v.m4a"));
+                extractAudio(video, m4a);
+                video.delete();
+                v = m4a;
             } catch (Exception e) {
-                out = null;
+                if (a == null) throw e;
             }
         }
-        // 2) wideo → wycięcie ścieżki dźwiękowej (bez ponownego kodowania)
-        if (out == null && videoUrl != null && !videoUrl.isEmpty()) {
-            File video = fetchToFile(videoUrl, "video.mp4", job);
-            job.stage("Wycinam dźwięk z filmu…");
-            File m4a = new File(getCacheDir(), job.tmp("sound.m4a"));
-            extractAudio(video, m4a);
-            video.delete();
-            out = m4a;
-            ext = "m4a"; mime = "audio/mp4";
+        if (a == null && v == null) throw new IOException("Brak pliku dźwięku do pobrania");
+
+        File out;
+        if (a != null && v != null) {
+            job.stage("Wybieram lepszą jakość…");
+            long ka = mediaInfo(a, isMp3(a) ? "mp3" : "m4a").optLong("kbps", 0);
+            long kv = mediaInfo(v, "m4a").optLong("kbps", 0);
+            // przy remisie (±8 kbps) AAC z filmu brzmi lepiej niż MP3 o tym samym bitrate
+            boolean useVideo = isMp3(a) ? kv + 8 >= ka : kv > ka;
+            out = useVideo ? v : a;
+            (useVideo ? a : v).delete();
+        } else {
+            out = a != null ? a : v;
         }
-        if (out == null) throw new IOException("Brak pliku dźwięku do pobrania");
+        String ext = isMp3(out) ? "mp3" : "m4a";
+        String mime = "mp3".equals(ext) ? "audio/mpeg" : "audio/mp4";
 
         String fileName = baseName + "." + ext;
         if ("mp3".equals(ext)) {
