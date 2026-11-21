@@ -61,3 +61,8 @@ main { padding-top: max(14px, env(safe-area-inset-top)); }
 .btn.yt { background: #ff0000; color: #fff; }
 .btn.yt.small { font-weight: 600; }
 .video .info .btn { width: 100%; text-align: center; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: .85rem; }
+.facts dt { color: var(--muted); white-space: nowrap; }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.facts.file { background: #111118; border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
+.tag { display: inline-block; font-size: .7rem; padding: 0 5px; border-radius: 4px; background: #555; color: #fff; }

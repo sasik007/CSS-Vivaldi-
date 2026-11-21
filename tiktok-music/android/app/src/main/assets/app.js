@@ -5,7 +5,8 @@ const TT_RE = /https?:\/\/[^\s]*tiktok\.com\/[^\s]+/i;
 
 function setStatus(msg, err = false) { statusEl.textContent = msg; statusEl.className = err ? "err" : ""; }
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-function fmt(sec) { return sec ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : ""; }
+function fmt(sec) { sec = Math.round(sec || 0); return sec ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : ""; }
+function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.round(b / 1024) + " KB"; }
 
 // --- most do Javy: wywołania asynchroniczne
 const pending = {};
@@ -32,7 +33,8 @@ async function searchSongs(term) {
     title: r.trackName, artist: r.artistName, album: r.collectionName,
     cover: (r.artworkUrl100 || "").replace("100x100", "300x300"), preview: r.previewUrl,
     duration: Math.round((r.trackTimeMillis || 0) / 1000), year: (r.releaseDate || "").slice(0, 4),
-    apple: r.trackViewUrl,
+    apple: r.trackViewUrl, genre: r.primaryGenreName, explicit: r.trackExplicitness === "explicit",
+    trackNo: r.trackNumber, trackCount: r.trackCount, date: (r.releaseDate || "").slice(0, 10),
   }));
 }
 
@@ -64,9 +66,15 @@ function renderResults(list) {
         <div class="top">
           ${s.cover ? `<img src="${esc(s.cover)}" alt="">` : ""}
           <div><h3>${esc(s.title)}</h3>
-            <div class="meta">${esc(s.artist)}<br>${esc(s.album || "")}${s.year ? " · " + esc(s.year) : ""}${s.duration ? " · " + fmt(s.duration) : ""}</div>
+            <div class="meta">${esc(s.artist)}${s.explicit ? ' <span class="tag">E</span>' : ""}</div>
           </div>
         </div>
+        <dl class="facts">
+          ${s.duration ? `<dt>⏱ Czas</dt><dd><b>${fmt(s.duration)}</b> (cała piosenka)</dd>` : ""}
+          ${s.album ? `<dt>💿 Album</dt><dd>${esc(s.album)}${s.trackNo ? ` · utwór ${s.trackNo}/${s.trackCount || "?"}` : ""}</dd>` : ""}
+          ${s.genre ? `<dt>🎼 Gatunek</dt><dd>${esc(s.genre)}</dd>` : ""}
+          ${s.date ? `<dt>📅 Wydano</dt><dd>${esc(s.date)}</dd>` : ""}
+        </dl>
         ${s.preview ? `<audio controls preload="none" src="${esc(s.preview)}"></audio>` : ""}
         <div class="links">${links}</div>
       </article>`);
@@ -106,6 +114,8 @@ async function analyze(url) {
         <div class="info">
           <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
           <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
+          ${m.duration ? `<p><span class="badge">⏱ Urywek</span><b>${fmt(m.duration)}</b></p>` : ""}
+          <div id="file-info"></div>
           <p>${ytButton(ytQuery, orig ? "▶ Szukaj w YouTube" : undefined)}</p>
           ${canDl ? `<p><button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek z TikToka</button></p>` : ""}
         </div>
@@ -137,8 +147,17 @@ async function downloadCurrent() {
     .replace(/[\\/:*?"<>|]+/g, "").trim().slice(0, 80) || "tiktok";
   const btn = $("#btn-dl"); btn.disabled = true; btn.textContent = "⏳ Pobieram…";
   try {
-    const msg = await call("download", m.playUrl || "", d.videoUrl || "", name);
-    btn.textContent = "✅ " + msg;
+    const i = JSON.parse(await call("download", m.playUrl || "", d.videoUrl || "", name));
+    btn.textContent = "✅ Zapisano";
+    const ch = i.channels === 1 ? "mono" : i.channels === 2 ? "stereo" : i.channels ? i.channels + " kanały" : "";
+    $("#file-info").innerHTML = `
+      <dl class="facts file">
+        <dt>📁 Plik</dt><dd>${esc(i.path)}</dd>
+        <dt>🎵 Format</dt><dd><b>${esc(i.format || "?")}</b>${i.codec && i.codec !== i.format ? ` (kodek ${esc(i.codec)})` : ""}</dd>
+        ${i.kbps ? `<dt>📶 Jakość</dt><dd>${i.kbps} kbps${i.sampleRate ? ` · ${(i.sampleRate / 1000).toFixed(1)} kHz` : ""}${ch ? " · " + ch : ""}</dd>` : ""}
+        ${i.duration ? `<dt>⏱ Czas</dt><dd>${fmt(i.duration)}</dd>` : ""}
+        ${i.size ? `<dt>💾 Rozmiar</dt><dd>${fmtSize(i.size)}</dd>` : ""}
+      </dl>`;
   } catch (err) {
     btn.disabled = false; btn.textContent = "⬇️ Spróbuj pobrać ponownie";
     setStatus("❌ " + err.message, true);

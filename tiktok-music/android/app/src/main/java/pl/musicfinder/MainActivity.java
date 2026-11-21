@@ -306,9 +306,52 @@ public class MainActivity extends Activity {
         if (out == null) throw new IOException("Brak pliku dźwięku do pobrania");
 
         String fileName = baseName + "." + ext;
+        JSONObject info = mediaInfo(out, ext);
         saveToDownloads(out, fileName, mime);
         out.delete();
-        return "Zapisano: Pobrane/Music Finder/" + fileName;
+        info.put("path", "Pobrane/Music Finder/" + fileName);
+        return info.toString();
+    }
+
+    /** Odczytuje parametry pliku audio: format, kodek, bitrate, częstotliwość, kanały, długość, rozmiar. */
+    private static JSONObject mediaInfo(File f, String ext) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("format", ext.toUpperCase());
+            o.put("size", f.length());
+            MediaExtractor ex = new MediaExtractor();
+            try {
+                ex.setDataSource(f.getAbsolutePath());
+                for (int i = 0; i < ex.getTrackCount(); i++) {
+                    MediaFormat mf = ex.getTrackFormat(i);
+                    String mime = mf.getString(MediaFormat.KEY_MIME);
+                    if (mime == null || !mime.startsWith("audio/")) continue;
+                    o.put("codec", codecName(mime));
+                    if (mf.containsKey(MediaFormat.KEY_SAMPLE_RATE)) o.put("sampleRate", mf.getInteger(MediaFormat.KEY_SAMPLE_RATE));
+                    if (mf.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) o.put("channels", mf.getInteger(MediaFormat.KEY_CHANNEL_COUNT));
+                    long durUs = mf.containsKey(MediaFormat.KEY_DURATION) ? mf.getLong(MediaFormat.KEY_DURATION) : 0;
+                    if (durUs > 0) o.put("duration", durUs / 1_000_000.0);
+                    int br = mf.containsKey(MediaFormat.KEY_BIT_RATE) ? mf.getInteger(MediaFormat.KEY_BIT_RATE) : 0;
+                    if (br <= 0 && durUs > 0) br = (int) (f.length() * 8 * 1_000_000L / durUs);  // średni bitrate
+                    if (br > 0) o.put("kbps", Math.round(br / 1000.0));
+                    break;
+                }
+            } finally {
+                ex.release();
+            }
+        } catch (Exception ignored) { }
+        return o;
+    }
+
+    private static String codecName(String mime) {
+        switch (mime) {
+            case "audio/mpeg": return "MP3";
+            case "audio/mp4a-latm": return "AAC";
+            case "audio/opus": return "Opus";
+            case "audio/vorbis": return "Vorbis";
+            case "audio/flac": return "FLAC";
+            default: return mime.replace("audio/", "").toUpperCase();
+        }
     }
 
     private static boolean isMp3(File f) throws IOException {
