@@ -34,6 +34,7 @@ function showTab(name) {
   document.querySelectorAll(".tab, .panel").forEach(e => e.classList.remove("active"));
   document.querySelector(`.tab[data-tab="${name}"]`).classList.add("active");
   $("#tab-" + name).classList.add("active");
+  document.body.dataset.tab = name;
 }
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => showTab(t.dataset.tab));
 
@@ -237,6 +238,7 @@ async function updateFullUI(target, ytQuery) {
   lastYt = null;
   const best = verifiedBest(target);
   const t = best ? { title: best.title, artist: best.artist } : target;
+  if (best && $("#np-title")) { $("#np-title").textContent = best.title; $("#np-artist").textContent = best.artist; }
   // najdokładniejsze zapytanie: potwierdzony utwór z katalogu > tytuł z opisu/dźwięku
   ytQuery = setYtQuery(best ? `${best.artist} ${best.title}` : (t && t.title ? `${t.artist || ""} ${t.title}` : ytQuery));
   const match = t && t.title ? lastFree.find(f => f.url && isSameSong(f, t)) : null;
@@ -263,14 +265,14 @@ async function updateFullUI(target, ytQuery) {
   const song = best || match;
   if (song && song.duration) {
     findYtMatch(t, ytQuery);  // w tle: dokładny film dla „Pobierz w YouTube”
-    el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">(${esc(song.artist || "")} — ${esc(song.title)})</small>`;
+    el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><b>${fmt(song.duration)}</b> <small class="muted">${best ? "z katalogu" : esc(song.source || "")}</small>`;
     return;
   }
   // brak w katalogu → YouTube, ale tylko film, którego tytuł zawiera tytuł piosenki
   el.innerHTML = `<span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam na YouTube…</small>`;
   const yt = await findYtMatch(t, ytQuery);
   el.innerHTML = yt && yt.length
-    ? `<span class="badge">⏱ Cała piosenka</span><b>${esc(yt.length)}</b> <small class="muted">(YouTube: ${esc(yt.title)})</small>`
+    ? `<span class="badge">⏱ Cała piosenka</span><b>${esc(yt.length)}</b> <small class="muted">z YouTube</small>`
     : `<span class="badge">⏱ Cała piosenka</span><small class="muted">nieznana — nie znaleziono tego utworu</small>`;
 }
 
@@ -290,11 +292,18 @@ document.addEventListener("click", (e) => {
   if (b) openInYtMusic(b);
 });
 
-function fullButtonHtml(q) {
-  return `<p class="muted small" id="yt-q"></p><p><button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
-    <small class="muted">Otwiera film w YouTube — pod filmem kliknij „Pobierz” (YouTube Premium).</small></p>
-    <p><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button>
-    <small class="muted" id="np-full-src"></small></p><div id="np-file"></div>`;
+/** Przyciski karty: główny „Pobierz urywek”, YouTube, „Pobierz cały”. */
+function actionsHtml(q, clipBtn) {
+  return `
+    <div class="actions">
+      ${clipBtn ? `<span class="span2">${clipBtn}</span>` : ""}
+      <button class="btn ytm" data-ytm="${esc(q)}">⬇️ Pobierz w YouTube</button>
+      <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
+      <span class="span2"><button class="btn full" id="np-full" disabled>⬇️ Pobierz cały — szukam…</button></span>
+    </div>
+    <p id="yt-q"></p>
+    <small id="np-full-src"></small>
+    <div id="np-file"></div>`;
 }
 
 async function downloadFullTo(btn, url, name) {
@@ -362,20 +371,17 @@ function renderResults(list) {
   list.forEach((s, i) => {
     const links =
       storeLinks(s).map(([n, u]) => `<button class="btn ghost small" data-open="${esc(u)}">${n}</button>`).join("");
+    const extra = [s.album, s.genre, s.date && s.date.slice(0, 4)].filter(Boolean).map(esc).join(" · ");
     resultsEl.insertAdjacentHTML("beforeend", `
       <article class="song ${i === 0 ? "best" : ""}">
         <div class="top">
-          ${s.cover ? `<img src="${esc(s.cover)}" alt="">` : ""}
+          ${s.cover ? `<img src="${esc(s.cover)}" alt="" onerror="this.remove()">` : ""}
           <div><h3>${esc(s.title)}</h3>
             <div class="meta">${esc(s.artist)}${s.explicit ? ' <span class="tag">E</span>' : ""}</div>
+            ${extra ? `<div class="extra">${extra}</div>` : ""}
           </div>
+          ${s.duration ? `<span class="dur">${fmt(s.duration)}</span>` : ""}
         </div>
-        <dl class="facts">
-          ${s.duration ? `<dt>⏱ Czas</dt><dd><b>${fmt(s.duration)}</b> (cała piosenka)</dd>` : ""}
-          ${s.album ? `<dt>💿 Album</dt><dd>${esc(s.album)}${s.trackNo ? ` · utwór ${s.trackNo}/${s.trackCount || "?"}` : ""}</dd>` : ""}
-          ${s.genre ? `<dt>🎼 Gatunek</dt><dd>${esc(s.genre)}</dd>` : ""}
-          ${s.date ? `<dt>📅 Wydano</dt><dd>${esc(s.date)}</dd>` : ""}
-        </dl>
         ${s.preview ? `<audio controls preload="none" src="${esc(s.preview)}"></audio>` : ""}
         <div class="links">${links}</div>
       </article>`);
@@ -469,20 +475,22 @@ async function analyze(url) {
     // dla „oryginalnego dźwięku” szukamy po opisie filmu (często jest tam tytuł piosenki)
     const ytQuery = orig ? (hintQuery(d.desc) || (d.desc || "").replace(/#\S+/g, "").trim() || m.author || m.title) : `${m.author || ""} ${m.title}`;
     $("#video-box").innerHTML = `
-      <div class="video">
-        ${m.cover || d.cover ? `<img src="${esc(m.cover || d.cover)}" alt="">` : ""}
-        <div class="info">
-          <p><b>@${esc(d.author || "")}</b> — ${esc((d.desc || "").slice(0, 120))}</p>
-          <p><span class="badge">Dźwięk</span>${esc(m.title || "?")}${m.author ? " · " + esc(m.author) : ""}</p>
-          ${m.duration ? `<p><span class="badge">⏱ Na TikToku</span><b>${fmt(m.duration)}</b> <small class="muted">(dźwięk)</small></p>` : ""}
-          <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
-          <div class="row np-actions">
-            <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(ytQuery))}">🔎 Szukaj w YouTube</button>
-            ${canDl ? `<button class="btn ghost" id="btn-dl">⬇️ Pobierz urywek</button>` : ""}
+      <div class="np">
+        <div class="np-head">🔗 Film z TikToka · @${esc(d.author || "")}</div>
+        <div class="np-main">
+          ${m.cover || d.cover ? `<img class="np-cover" src="${esc(m.cover || d.cover)}" alt="" onerror="this.remove()">` : ""}
+          <div>
+            <h2 class="np-title" id="np-title">${esc(orig ? "Oryginalny dźwięk" : (m.title || "?"))}</h2>
+            <div class="np-artist" id="np-artist">${esc(orig ? "" : (m.author || ""))}</div>
           </div>
-          <div id="file-info"></div>
-          ${fullButtonHtml(ytQuery)}
         </div>
+        <div class="np-sub dim">♬ ${esc(m.title || "?")}${d.desc ? ` · ${esc(d.desc.slice(0, 90))}` : ""}</div>
+        <div class="facts-list">
+          ${m.duration ? `<div class="fact"><span class="badge">⏱ Na TikToku</span><b>${fmt(m.duration)}</b> <small class="muted">cały dźwięk${d.videoDuration ? ` · film ${fmt(d.videoDuration)}` : ""}</small></div>` : ""}
+          <div class="fact" id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></div>
+        </div>
+        ${actionsHtml(ytQuery, canDl ? `<button class="btn primary wide" id="btn-dl">⬇️ Pobierz urywek</button>` : "")}
+        <div id="file-info"></div>
       </div>`;
     if (canDl) $("#btn-dl").onclick = () => openClipModal(null, current);
     const autoDl = canDl && autoDownloadAt && Date.now() - autoDownloadAt < 5 * 60_000;
@@ -493,7 +501,9 @@ async function analyze(url) {
     if (useCap) {
       current.hint = ph.q;
       current.hintTag = ph;
-      $("#full-len").insertAdjacentHTML("beforebegin", `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>`);
+      $("#full-len").insertAdjacentHTML("beforebegin", `<div class="fact"><span class="badge">📝 ${esc(ph.from)}</span>${esc(ph.raw || ph.q)}</div>`);
+      $("#np-title").textContent = ph.title || ph.q;
+      $("#np-artist").textContent = ph.artist || "";
       await searchAll(ph.q, ph.raw || ph.q);
     } else if (orig) {
       setStatus("To „oryginalny dźwięk” bez tytułu piosenki. Pobierz go albo rozpoznaj w zakładce 🎙️.", true);
@@ -786,19 +796,24 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
   const hq = useCap ? ph.q : "";
   const q = useCap ? ph.q : orig ? "" : title.replace(/\s+-\s+/g, " ");
+  const parts0 = title.split(/\s+-\s+/);
+  const headTitle = useCap ? (ph.title || ph.q) : orig ? "Nieznany utwór" : parts0[0];
+  const headArtist = useCap ? (ph.artist || "") : orig ? "" : parts0.slice(1).join(" ");
   $("#video-box").innerHTML = `
-    <div class="video"><div class="info">
-      <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
-      ${orig && !useCap ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.</p>` : ""}
-      ${useCap ? `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>` : ""}
-      <p id="tt-len">${tiktokTimeHtml(dur, 0, est)}</p>
-      <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
-      <div class="row np-actions">
-        <button class="btn ghost" data-yt-search data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
-        <button class="btn ghost" id="np-dl">⬇️ Pobierz urywek</button>
+    <div class="np">
+      <div class="np-head"><span class="live-dot"></span>Teraz na TikToku</div>
+      <div class="np-main"><div>
+        <h2 class="np-title" id="np-title">${esc(headTitle)}</h2>
+        <div class="np-artist" id="np-artist">${esc(headArtist)}</div>
+      </div></div>
+      <div class="np-sub">♬ ${esc(title)}${orig && !useCap ? " — brak tytułu piosenki" : ""}</div>
+      <div class="facts-list">
+        ${useCap ? `<div class="fact"><span class="badge">📝 ${esc(ph.from)}</span>${esc(ph.raw || ph.q)}</div>` : ""}
+        <div class="fact" id="tt-len">${tiktokTimeHtml(dur, 0, est)}</div>
+        <div class="fact" id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></div>
       </div>
-      ${fullButtonHtml(q)}
-    </div></div>`;
+      ${actionsHtml(q, `<button class="btn primary wide" id="np-dl">⬇️ Pobierz urywek</button>`)}
+    </div>`;
   window.updateTikTokTime(dur, 0, est);
   $("#np-dl").onclick = () => {
     if (cardData) return openClipModal(null, cardData);  // dane już są — od razu
@@ -817,7 +832,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
     setStatus("To „oryginalny dźwięk” bez tytułu — spróbuj 🎙️ Rozpoznaj (Shazam) albo 🔎 Szukaj w YouTube.", true);
     return updateFullUI(null, q);
   }
-  await searchAll(q, title);
+  await searchAll(q, headArtist ? `${headArtist} – ${headTitle}` : headTitle);
   const parts = title.split(/\s+-\s+/);
   await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
 };
@@ -907,3 +922,10 @@ async function doRefresh() {
     setTimeout(() => { ptr.style.height = "0"; refreshing = false; }, 400);
   }
 }
+
+// --- ⚙️ ustawienia: rozwiń „Ustawienia i źródła” na dole
+$("#btn-settings").onclick = () => {
+  const d = $("#sources");
+  d.open = true;
+  d.scrollIntoView({ behavior: "smooth", block: "start" });
+};

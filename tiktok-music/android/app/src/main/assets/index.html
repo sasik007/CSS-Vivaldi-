@@ -8,26 +8,23 @@
 </head>
 <body>
 <main>
-  <header>
-    <h1>🎵 Music Finder</h1>
-    <p class="sub">Urywek z TikToka → cała piosenka.</p>
+  <header class="appbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">♪</span>
+      <div>
+        <h1>Music Finder</h1>
+        <p class="sub">Urywek z TikToka → cała piosenka</p>
+      </div>
+    </div>
+    <button class="icon-btn" id="btn-settings" aria-label="Ustawienia">⚙️</button>
   </header>
 
   <nav class="tabs">
-    <button class="tab active" data-tab="link">🔗 TikTok</button>
-    <button class="tab" data-tab="search">🔍 Szukaj</button>
-    <button class="tab" data-tab="mic">🎙️ Rozpoznaj</button>
+    <button class="tab active" data-tab="link">TikTok</button>
+    <button class="tab" data-tab="search">Szukaj</button>
+    <button class="tab" data-tab="mic">Rozpoznaj</button>
   </nav>
 
-  <details class="sources" id="sources">
-    <summary>⚙️ Źródła wyszukiwania</summary>
-    <label><input type="checkbox" data-src="itunes"> <b>Katalog muzyki</b> <small>tytuł, album, czas, odsłuch 30 s</small></label>
-    <label><input type="checkbox" data-src="youtube"> <b>YouTube</b> <small>przyciski wyszukiwania w YouTube</small></label>
-    <label><input type="checkbox" data-src="openverse"> <b>Openverse</b> <small>Jamendo, ccMixter, Wikimedia… — <b>pobieranie</b> całych utworów</small></label>
-    <label><input type="checkbox" data-src="archive"> <b>Internet Archive</b> <small>tylko licencje Creative Commons — <b>pobieranie</b></small></label>
-    <label><input type="checkbox" data-src="autodetails2"> <b>Dane filmu od razu</b> <small>w okienku obok TikToka: przy każdym filmie sam kopiuje link i pokazuje czas (panel „Udostępnij” miga przy każdym filmie — domyślnie wyłączone)</small></label>
-    <p class="hint">Do pobrania są tylko utwory na wolnych licencjach (legalne). Popularnych hitów tam zwykle nie ma.</p>
-  </details>
 
   <div id="setup" class="setup" hidden>
     <b>⚡ Automatyczne wykrywanie</b>
@@ -53,29 +50,32 @@
 
   <section class="panel active" id="tab-link">
     <div id="video-box"></div>
-    <form id="form-link" class="row">
-      <input id="tt-url" type="url" inputmode="url" placeholder="Link do filmu z TikToka" required>
-      <button type="button" id="btn-paste" class="btn ghost">📋 Wklej</button>
-      <button type="submit" id="btn-find">Znajdź</button>
-    </form>
-    <p class="hint">⚡ Najszybciej: w TikToku <b>Udostępnij → Kopiuj link</b>, potem otwórz Music Finder — wyszuka sam.<br>
-      Albo <b>Udostępnij → Więcej → Music Finder</b> (będzie na górze listy).</p>
+    <div class="linkbox">
+      <div class="label">Link z TikToka</div>
+      <form id="form-link" class="inputbar">
+        <input id="tt-url" type="url" inputmode="url" placeholder="Wklej link do filmu…" required>
+        <button type="button" id="btn-paste" class="btn ghost" aria-label="Wklej">📋</button>
+        <button type="submit" id="btn-find" class="btn primary">Znajdź</button>
+      </form>
+      <p class="hint">W TikToku: <b>Udostępnij → Kopiuj link</b> i otwórz Music Finder — wyszuka sam.</p>
+    </div>
   </section>
 
   <section class="panel" id="tab-search">
-    <form id="form-search" class="row">
+    <form id="form-search" class="inputbar">
       <input id="q" type="text" placeholder="Tytuł, wykonawca, fragment tekstu…" required>
-      <button type="submit">Szukaj</button>
+      <button type="submit" class="btn primary">Szukaj</button>
     </form>
-    <p><button type="button" id="btn-yt" class="btn yt">🔎 Szukaj w YouTube</button></p>
+    <button type="button" id="btn-yt" class="btn ghost wide">🔎 Szukaj w YouTube</button>
   </section>
 
   <section class="panel" id="tab-mic">
-    <p>Gdy na TikToku leci „oryginalny dźwięk” bez nazwy, puść urywek i rozpoznaj go:</p>
-    <button id="btn-rec" class="big">🎙️ Rozpoznaj piosenkę</button>
-    <p class="hint">Otworzy Shazam (jeśli masz) albo wyszukiwanie piosenek Google. Potem wpisz tytuł w 🔍 Szukaj.</p>
-    <hr>
-    <p><b>🎧 Teraz na TikToku</b> — automatyczne wykrywanie</p>
+    <div class="mic-hero">
+      <button id="btn-rec" class="mic-btn" aria-label="Rozpoznaj piosenkę">🎙️</button>
+      <h2>Rozpoznaj piosenkę</h2>
+      <p class="hint">Dla „oryginalnych dźwięków” bez nazwy. Otworzy Shazam albo wyszukiwanie piosenek Google — potem wpisz tytuł w „Szukaj”.</p>
+    </div>
+    <div class="label">Teraz na TikToku</div>
     <div class="row">
       <button class="btn ghost" id="btn-np">🔄 Pokaż, co gra</button>
       <button class="btn ghost" id="btn-diag">🔧 Diagnostyka</button>
@@ -84,8 +84,18 @@
   </section>
 
   <div id="status"></div>
-  <div id="results" class="grid"></div>
+  <div id="results" class="list"></div>
   <div id="free"></div>
+
+  <details class="sources" id="sources">
+    <summary>⚙️ Ustawienia i źródła</summary>
+    <label><input type="checkbox" data-src="itunes"> <b>Katalog muzyki</b> <small>tytuł, album, czas, odsłuch 30 s</small></label>
+    <label><input type="checkbox" data-src="youtube"> <b>YouTube</b> <small>przyciski wyszukiwania w YouTube</small></label>
+    <label><input type="checkbox" data-src="openverse"> <b>Openverse</b> <small>Jamendo, ccMixter, Wikimedia… — <b>pobieranie</b> całych utworów</small></label>
+    <label><input type="checkbox" data-src="archive"> <b>Internet Archive</b> <small>tylko licencje Creative Commons — <b>pobieranie</b></small></label>
+    <label><input type="checkbox" data-src="autodetails2"> <b>Dane filmu od razu</b> <small>w okienku obok TikToka: przy każdym filmie sam kopiuje link i pokazuje czas (panel „Udostępnij” miga przy każdym filmie — domyślnie wyłączone)</small></label>
+    <p class="hint">Do pobrania są tylko utwory na wolnych licencjach (legalne). Popularnych hitów tam zwykle nie ma.</p>
+  </details>
 
   <footer>
     <p>Całych piosenek słuchasz w Spotify, YouTube Music, Apple Music… Dźwięk z TikToka pobieraj tylko na własny użytek.</p>
