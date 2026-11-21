@@ -365,46 +365,106 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ TikTok
 
+    private Runnable scrapeWatchdog = null;
+    private boolean scrapeBusy = false;
+
     private void startScrape(int id, String url) {
         if (scrapePoll != null) {  // anuluj poprzedni odczyt
-            main.removeCallbacks(scrapePoll);
+            finishScrape();
             reply(scrapeId, false, "Anulowano");
         }
         scrapeId = id;
-        scrapeDeadline = System.currentTimeMillis() + 30_000;
+        scrapeDeadline = System.currentTimeMillis() + 25_000;
+        scrapeBusy = false;
+        scraper.onResume();
+        scraper.resumeTimers();
         scraper.stopLoading();
         scraper.loadUrl(url);
-        scrapePoll = new Runnable() {
-            @Override
-            public void run() {
-                scraper.evaluateJavascript(EXTRACT_JS, res -> {
-                    if (scrapePoll != this) return;
-                    String json = decodeJsResult(res);
-                    if (json != null) {
-                        finishScrape();
-                        try {
-                            JSONObject o = new JSONObject(json);
-                            int st = o.optInt("status", -1);
-                            if (st == 0) reply(id, true, json);
-                            else if (st == -3) reply(id, false, "TikTok wymaga zalogowania, żeby zobaczyć ten film.");
-                            else reply(id, false, "Film niedostępny (prywatny, usunięty lub z ograniczeniem wieku). Kod: " + st);
-                        } catch (Exception e) {
-                            reply(id, false, "Nie udało się odczytać danych filmu.");
-                        }
-                    } else if (System.currentTimeMillis() > scrapeDeadline) {
-                        finishScrape();
-                        reply(id, false, "TikTok nie odpowiedział. Sprawdź internet i spróbuj ponownie.");
-                    } else {
-                        main.postDelayed(this, 700);
-                    }
-                });
-            }
+        final Runnable[] self = new Runnable[1];
+        scrapePoll = self[0] = () -> {
+            if (scrapePoll != self[0]) return;
+            // następne sprawdzenie planujemy zawsze — nie czekamy na odpowiedź przeglądarki
+            main.postDelayed(self[0], 700);
+            if (scrapeBusy) return;
+            scrapeBusy = true;
+            scraper.evaluateJavascript(EXTRACT_JS, res -> {
+                scrapeBusy = false;
+                if (scrapePoll != self[0]) return;
+                String json = decodeJsResult(res);
+                if (json == null) return;
+                finishScrape();
+                try {
+                    JSONObject o = new JSONObject(json);
+                    int st = o.optInt("status", -1);
+                    if (st == 0) reply(id, true, json);
+                    else if (st == -3) reply(id, false, "TikTok wymaga zalogowania, żeby zobaczyć ten film.");
+                    else reply(id, false, "Film niedostępny (prywatny, usunięty lub z ograniczeniem wieku). Kod: " + st);
+                } catch (Exception e) {
+                    reply(id, false, "Nie udało się odczytać danych filmu.");
+                }
+            });
         };
-        main.postDelayed(scrapePoll, 1500);
+        // twardy limit czasu — zawsze kończy oczekiwanie
+        scrapeWatchdog = () -> {
+            if (scrapeId != id || scrapePoll == null) return;
+            finishScrape();
+            reply(id, false, "TikTok nie odpowiedział w 25 s. Sprawdź internet i spróbuj ponownie.");
+        };
+        main.postDelayed(scrapeWatchdog, 25_000);
+        main.postDelayed(scrapePoll, 1200);
+    }
+
+    // ------------------------------------------------------------------ szybki odczyt bez przeglądarki
+
+    /** Pobiera stronę filmu zwykłym połączeniem i czyta dane z __UNIVERSAL_DATA_FOR_REHYDRATION__. null = nie wyszło. */
+    private String directScrape(String url) {
+        try {
+            HttpURLConnection c = open(url, null);
+            c.setRequestProperty("Accept-Language", "pl-PL,pl;q=0.9,en;q=0.8");
+            c.setRequestProperty("Accept", "text/html,application/xhtml+xml");
+            if (c.getResponseCode() >= 400) return null;
+            String body;
+            try (InputStream in = c.getInputStream()) { body = readAll(in); }
+            String finalUrl = c.getURL().toString();
+            // ciasteczka TikToka (potrzebne do pobrania filmu z CDN)
+            java.util.List<String> sc = c.getHeaderFields().get("Set-Cookie");
+            if (sc != null) for (String ck : sc) CookieManager.getInstance().setCookie(finalUrl, ck);
+            c.disconnect();
+            Matcher m = Pattern.compile("<script[^>]+id=\"__UNIVERSAL_DATA_FOR_REHYDRATION__\"[^>]*>(.*?)</script>", Pattern.DOTALL).matcher(body);
+            if (!m.find()) return null;
+            JSONObject scope = new JSONObject(m.group(1)).optJSONObject("__DEFAULT_SCOPE__");
+            JSONObject vd = scope == null ? null : scope.optJSONObject("webapp.video-detail");
+            if (vd == null) return null;
+            JSONObject info = vd.optJSONObject("itemInfo");
+            JSONObject it = info == null ? null : info.optJSONObject("itemStruct");
+            if (it == null) return new JSONObject().put("status", vd.optInt("statusCode", -2)).toString();
+            JSONObject mu = it.optJSONObject("music"), v = it.optJSONObject("video"), au = it.optJSONObject("author");
+            if (mu == null) mu = new JSONObject();
+            if (v == null) v = new JSONObject();
+            Object pa = v.opt("playAddr");
+            String play = pa instanceof String ? (String) pa : "";
+            if (pa instanceof JSONArray && ((JSONArray) pa).length() > 0) play = ((JSONArray) pa).getJSONObject(0).optString("src");
+            if (play.isEmpty()) play = v.optString("downloadAddr");
+            JSONObject music = new JSONObject()
+                    .put("title", mu.optString("title")).put("author", mu.optString("authorName"))
+                    .put("album", mu.optString("album")).put("original", mu.optBoolean("original"))
+                    .put("playUrl", mu.optString("playUrl"))
+                    .put("cover", mu.optString("coverLarge", mu.optString("coverMedium")))
+                    .put("duration", mu.optInt("duration"));
+            return new JSONObject().put("status", 0).put("id", it.optString("id")).put("desc", it.optString("desc"))
+                    .put("author", au == null ? "" : au.optString("uniqueId"))
+                    .put("cover", v.optString("cover", v.optString("originCover")))
+                    .put("videoUrl", play).put("videoDuration", v.optInt("duration")).put("page", finalUrl)
+                    .put("music", music).toString();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void finishScrape() {
         if (scrapePoll != null) main.removeCallbacks(scrapePoll);
+        if (scrapeWatchdog != null) main.removeCallbacks(scrapeWatchdog);
+        scrapeWatchdog = null;
         scrapePoll = null;
         scraper.stopLoading();
         scraper.loadUrl("about:blank");
@@ -831,7 +891,16 @@ public class MainActivity extends Activity {
     class Bridge {
         @JavascriptInterface
         public void tiktok(int id, String url) {
-            main.post(() -> startScrape(id, url));
+            new Thread(() -> {
+                String json = directScrape(url);  // szybko (1–2 s), bez przeglądarki
+                try {
+                    if (json != null && new JSONObject(json).optInt("status", -1) == 0) {
+                        reply(id, true, json);
+                        return;
+                    }
+                } catch (Exception ignored) { }
+                main.post(() -> startScrape(id, url));  // zapas: ukryta przeglądarka
+            }).start();
         }
 
         @JavascriptInterface

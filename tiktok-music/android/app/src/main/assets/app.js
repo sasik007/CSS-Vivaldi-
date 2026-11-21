@@ -557,15 +557,26 @@ $("#modal").onclick = (e) => { if (e.target.id === "modal") closeModal(); };
 async function openClipModal(url, data) {
   const sheet = $("#sheet");
   $("#modal").hidden = false;
-  sheet.innerHTML = `<p>⏳ Wczytuję dane z TikToka…</p><div class="row"><button class="btn ghost" id="m-cancel">Anuluj</button></div>`;
+  sheet.innerHTML = `<p>⏳ Wczytuję dane z TikToka… <span id="m-sec" class="muted"></span></p><div class="row"><button class="btn ghost" id="m-cancel">Anuluj</button></div>`;
   $("#m-cancel").onclick = closeModal;
+  const t0 = Date.now();
+  const timer = setInterval(() => { const el = $("#m-sec"); if (el) el.textContent = Math.round((Date.now() - t0) / 1000) + " s"; else clearInterval(timer); }, 500);
   let d = data;
-  try { if (!d) d = JSON.parse(await call("tiktok", url)); }
-  catch (err) {
-    sheet.innerHTML = `<p class="err">❌ ${esc(err.message)}</p><div class="row"><button class="btn ghost" id="m-cancel">Zamknij</button></div>`;
+  try {
+    if (!d) d = JSON.parse(await Promise.race([
+      call("tiktok", url),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("TikTok nie odpowiada. Spróbuj ponownie.")), 30000)),
+    ]));
+  } catch (err) {
+    clearInterval(timer);
+    if ($("#modal").hidden) return;
+    sheet.innerHTML = `<p class="err">❌ ${esc(err.message)}</p>
+      <div class="row m-actions"><button class="btn" id="m-retry">🔄 Spróbuj ponownie</button><button class="btn ghost" id="m-cancel">Zamknij</button></div>`;
     $("#m-cancel").onclick = closeModal;
+    $("#m-retry").onclick = () => openClipModal(url);
     return;
   }
+  clearInterval(timer);
   if ($("#modal").hidden) return;  // anulowano w międzyczasie
   current = d;
   if (!d.hintTag) { const ph = parseHint(d.desc); if (ph.q && (isOriginal(d.music || {}) || ph.from !== "Z hashtagów")) d.hintTag = ph; }
