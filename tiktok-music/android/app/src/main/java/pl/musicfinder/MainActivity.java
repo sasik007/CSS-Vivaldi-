@@ -901,7 +901,7 @@ public class MainActivity extends Activity {
                     }
                 }
             });
-            return TikTokWatcher.requestCopyLink();
+            return TikTokWatcher.requestCopyLink(isInMultiWindowMode());
         }
 
         /** Wraca do TikToka, żeby skopiować link do bieżącego filmu. */

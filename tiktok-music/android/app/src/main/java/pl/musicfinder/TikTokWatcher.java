@@ -66,18 +66,20 @@ public class TikTokWatcher extends AccessibilityService {
     }
 
     /** Prosi usługę o skopiowanie linku do bieżącego filmu w TikToku. false = usługa wyłączona. */
-    static boolean requestCopyLink() {
+    static boolean requestCopyLink(boolean tiktokVisible) {
         TikTokWatcher w = instance;
         if (w == null) return false;
-        w.h.post(w::startGrab);
+        w.h.post(() -> w.startGrab(tiktokVisible));
         return true;
     }
 
-    private void startGrab() {
+
+    private void startGrab(boolean tiktokVisible) {
         h.removeCallbacks(grabTick);
         grabStep = 1;
-        grabDeadline = System.currentTimeMillis() + 9000;
-        h.postDelayed(grabTick, 900);  // czas na przełączenie do TikToka
+        grabDeadline = System.currentTimeMillis() + 8000;
+        // TikTok widoczny obok (okienko) → od razu; inaczej chwila na przełączenie
+        h.postDelayed(grabTick, tiktokVisible ? 50 : 700);
     }
 
     private final Runnable grabTick = new Runnable() {
@@ -86,11 +88,11 @@ public class TikTokWatcher extends AccessibilityService {
             if (grabStep == 0) return;
             if (System.currentTimeMillis() > grabDeadline) { finishGrab(false); return; }
             if (grabStep == 1) {
-                if (clickFirst(SHARE_RE)) { grabStep = 2; h.postDelayed(this, 700); }
-                else h.postDelayed(this, 400);
+                if (clickFirst(SHARE_RE)) { grabStep = 2; h.postDelayed(this, 250); }
+                else h.postDelayed(this, 200);
             } else if (grabStep == 2) {
-                if (clickFirst(COPY_RE)) { grabStep = 3; h.postDelayed(() -> finishGrab(true), 600); }
-                else h.postDelayed(this, 300);
+                if (clickFirst(COPY_RE)) { grabStep = 3; h.postDelayed(() -> finishGrab(true), 250); }
+                else h.postDelayed(this, 150);
             }
         }
     };
@@ -98,6 +100,7 @@ public class TikTokWatcher extends AccessibilityService {
     private void finishGrab(boolean ok) {
         if (!ok && grabStep == 2) performGlobalAction(GLOBAL_ACTION_BACK);  // zamknij otwarty panel udostępniania
         grabStep = 0;
+        // Music Finder dostaje fokus (w okienku nic się nie przełącza), żeby odczytać skopiowany link
         Intent i = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 .putExtra(MainActivity.EXTRA_GRAB, ok);
