@@ -455,7 +455,7 @@ window.grabFailed = () => {
   setStatus("Nie udało się automatycznie skopiować linku. W TikToku: Udostępnij → Kopiuj link i wróć — pobierze się samo.", true);
 };
 let autoDownloadAt = 0, grabForModalAt = 0, grabForDetailsAt = 0;
-let cardData = null, cardKey = "";   // dane filmu z bieżącej karty „Teraz na TikToku”
+let cardData = null, cardKey = "", cardLink = "", grabForCommentsAt = 0;   // dane filmu z bieżącej karty „Teraz na TikToku”
 
 function isOriginal(m) {
   const t = (m.title || "").toLowerCase();
@@ -513,6 +513,8 @@ async function analyze(url) {
       await searchAll(`${m.author || ""} ${m.title}`.trim(), m.title, m.author ? m.title : "");
     }
     await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : orig ? null : { title: m.title, artist: m.author }, useCap ? ph.q : ytQuery);
+    cardKey = "link|" + url; cardLink = url; cardData = d;
+    maybeComments(cardKey);
     // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
     if (autoDl) downloadCurrent();
   } catch (err) {
@@ -577,6 +579,12 @@ $("#btn-paste").onclick = () => {
 window.handleShared = (text) => {
   const m = (text || "").match(TT_RE);
   if (!m) return setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
+  // link skopiowany dla komentarzy → dane karty + komentarze w tle
+  if (grabForCommentsAt && Date.now() - grabForCommentsAt < 60_000) {
+    grabForCommentsAt = 0;
+    loadCardDetails(m[0]);
+    return fetchCommentsFor(m[0]);
+  }
   // link skopiowany automatycznie dla danych karty (czas od razu)
   if (grabForDetailsAt && Date.now() - grabForDetailsAt < 60_000) {
     grabForDetailsAt = 0;
@@ -774,6 +782,7 @@ async function loadCardDetails(url) {
     const d = JSON.parse(await call("tiktok", url));
     if (key !== cardKey) return;  // w międzyczasie inny film
     cardData = d;
+    cardLink = url;
     const m = d.music || {};
     window.updateTikTokTime(m.duration || d.videoDuration || 0, m.duration ? d.videoDuration : 0);
   } catch (err) {
@@ -786,7 +795,9 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   npCalls++;
   cardKey = title + "|" + hint + "|" + Date.now();
   cardData = null;
+  cardLink = "";
   grabForDetailsAt = 0;
+  grabForCommentsAt = 0;
   const myKey = cardKey;
   // w okienku obok TikToka: po 1,5 s stabilnego filmu pobierz dane (czas) automatycznie
   if (src.autodetails2 && Android.watcherEnabled() && Android.isMultiWindow && Android.isMultiWindow())
@@ -997,7 +1008,7 @@ function mineComments(texts) {
 let commentsFor = "";
 function commentsFactHtml(state) {
   return `<span class="badge">💬 Komentarze</span>` + (state === "busy"
-    ? `<small class="muted">⏳ czytam…</small>`
+    ? `<small class="muted">⏳ czytam w tle…</small>`
     : `<small class="muted cm-msg">${state || "może ktoś podał tytuł"}</small><button class="btn ghost mini" id="cm-btn">Szukaj</button>`);
 }
 function showCommentsFact(state) {
@@ -1014,17 +1025,35 @@ function showCommentsFact(state) {
 }
 function startComments(key) {
   if (key !== cardKey) return;
+  const link = cardLink || (current && current.page) || "";
+  if (link) return fetchCommentsFor(link);
+  // brak linku → skopiuj go raz (krótkie mignięcie „Udostępnij”), resztę robimy w tle
+  showCommentsFact("busy");
+  grabForCommentsAt = Date.now();
+  if (!Android.grabTikTokLink()) {
+    grabForCommentsAt = 0;
+    showCommentsFact("włącz usługę wykrywania w Ułatwieniach dostępu");
+  }
+}
+/** Wszystkie komentarze filmu pobrane w tle (niewidoczna przeglądarka). */
+async function fetchCommentsFor(link) {
+  const key = cardKey;
   commentsFor = key;
   showCommentsFact("busy");
-  if (!Android.readComments || !Android.readComments()) {
-    commentsFor = "";
-    showCommentsFact("włącz usługę wykrywania w Ułatwieniach dostępu");
+  try {
+    const texts = JSON.parse(await call("fetchComments", link));
+    if (key !== cardKey) return;
+    await window.handleComments(texts, texts.length > 0);
+  } catch (err) {
+    if (key === cardKey) { commentsFor = ""; showCommentsFact("nie udało się pobrać komentarzy"); }
   }
 }
 /** Po nieudanym wyszukaniu: w okienku obok TikToka czytaj komentarze automatycznie, inaczej przycisk. */
 function maybeComments(key) {
   if (key !== cardKey || verifiedBest(lastTarget)) return;
   showCommentsFact();
+  // link znany → komentarze w tle od razu (nic nie widać)
+  if (cardLink) return fetchCommentsFor(cardLink);
   if (src.commentsAuto && Android.isMultiWindow && Android.isMultiWindow() && Android.watcherEnabled())
     setTimeout(() => { if (key === cardKey && document.visibilityState === "visible" && $("#modal").hidden) startComments(key); }, 1200);
 }
@@ -1032,7 +1061,7 @@ function maybeComments(key) {
 window.handleComments = async (texts, opened) => {
   if (!commentsFor || commentsFor !== cardKey) return;
   commentsFor = "";
-  if (!opened) return showCommentsFact("nie znaleziono przycisku komentarzy — otwórz je w TikToku ręcznie i kliknij");
+  if (!opened) return showCommentsFact("TikTok nie pokazał komentarzy — spróbuj ponownie");
   const cands = mineComments(texts).slice(0, 4);
   if (!cands.length) return showCommentsFact(`brak tytułu w ${texts.length} przeczytanych napisach — przewiń komentarze i spróbuj ponownie`);
   showCommentsFact("busy");
