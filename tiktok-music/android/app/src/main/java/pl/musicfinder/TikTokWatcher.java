@@ -31,6 +31,8 @@ public class TikTokWatcher extends AccessibilityService {
     static final String KEY_HINT = "np_hint";
     /** Długość bieżącego filmu w TikToku (s), z paska postępu; 0 = nieznana. */
     static final String KEY_DUR = "np_dur";
+    /** true = czas wyliczony z tempa paska postępu (przybliżony). */
+    static final String KEY_DUR_EST = "np_dur_est";
     private static final Pattern TIME_PAIR = Pattern.compile("(\\d{1,2}):(\\d{2})\\s*/\\s*(\\d{1,2}):(\\d{2})");
     static final String KEY_DBG = "dbg_json";
     static final String KEY_DBG_TIME = "dbg_time";
@@ -153,6 +155,12 @@ public class TikTokWatcher extends AccessibilityService {
     private double durSec;       // najlepsza znaleziona długość filmu
     private int durWidth;        // szerokość paska, z którego ją wzięto
     private String rangeDbg;
+    private float rangeCur, rangeMax;   // najszerszy pasek postępu w tym skanie
+    // szacowanie długości filmu z tempa przesuwania się paska (między skanami)
+    private String estTitle = "";
+    private long estStartT = 0;
+    private float estStartCur = 0, estLastCur = 0;
+    private double estDur = 0;
     private final List<String> captions = new ArrayList<>();
     private static final Pattern UI_TEXT = Pattern.compile(
             "^(zobacz tłumaczenie|więcej|mniej|obserwuj|obserwowani|polub|udostępnij|dodaj komentarz|"
@@ -178,6 +186,7 @@ public class TikTokWatcher extends AccessibilityService {
         durSec = 0;
         durWidth = 0;
         rangeDbg = null;
+        rangeMax = 0;
         int windows = 0;
 
         // 1) wszystkie okna (okienko, podzielony ekran) — szukamy tych należących do TikToka
@@ -223,19 +232,48 @@ public class TikTokWatcher extends AccessibilityService {
                 for (String c : captions) hb.append(c).append('\n');
                 if (hint != null && !captions.contains(hint)) hb.append(hint);
                 e.putString(KEY_HINT, hb.toString().trim());
-                e.putLong(KEY_DUR, Math.round(durSec));
+                boolean est = false;
+                if (durSec <= 0) {
+                    durSec = estimate(title, now);
+                    est = durSec > 0;
+                }
+                e.putLong(KEY_DUR, Math.round(durSec)).putBoolean(KEY_DUR_EST, est);
             }
         }
         e.apply();
+    }
+
+    /**
+     * Długość filmu z tempa paska: pasek przesuwa się o Δcur w Δt sekund → długość = max·Δt/Δcur.
+     * Po zapętleniu / przewinięciu (pasek się cofa) pomiar zaczyna się od nowa.
+     */
+    private double estimate(String title, long now) {
+        if (!title.equals(estTitle)) { estTitle = title; estStartT = 0; estDur = 0; }
+        if (rangeMax <= 0) return estDur;
+        if (estStartT == 0 || rangeCur < estLastCur - rangeMax * 0.02f) {
+            estStartT = now;
+            estStartCur = rangeCur;
+        } else {
+            double dt = (now - estStartT) / 1000.0, dc = rangeCur - estStartCur;
+            if (dt >= 2 && dc > 0) {
+                double d = rangeMax * dt / dc;
+                if (d >= 2 && d <= 3600) estDur = d;
+            }
+        }
+        estLastCur = rangeCur;
+        if (rangeDbg != null && estDur > 0) rangeDbg += String.format(java.util.Locale.US, " → ~%.1f s", estDur);
+        return estDur;
     }
 
     /** Pasek postępu filmu (SeekBar/ProgressBar) albo napis „0:05 / 0:31”. */
     private void readDuration(AccessibilityNodeInfo n) {
         AccessibilityNodeInfo.RangeInfo r = n.getRangeInfo();
         if (r != null && r.getMax() > 0 && tmp.width() > durWidth) {
-            float max = r.getMax();
-            rangeDbg = n.getClassName() + " typ=" + r.getType() + " " + r.getCurrent() + "/" + max + " szer=" + tmp.width();
-            // tylko do diagnostyki — wartości paska bywają mylące (np. stałe 10)
+            // „max” paska nie jest długością (bywa stałe, np. 10) — liczymy tempo przesuwania się
+            durWidth = tmp.width();
+            rangeMax = r.getMax() - r.getMin();
+            rangeCur = r.getCurrent() - r.getMin();
+            rangeDbg = n.getClassName() + " " + r.getCurrent() + "/" + r.getMax() + " szer=" + tmp.width();
         }
         for (CharSequence cs : new CharSequence[]{n.getText(), n.getContentDescription()}) {
             if (cs == null) continue;
@@ -243,6 +281,7 @@ public class TikTokWatcher extends AccessibilityService {
             if (m.find()) {
                 durSec = Integer.parseInt(m.group(3)) * 60 + Integer.parseInt(m.group(4));
                 durWidth = Integer.MAX_VALUE;
+                rangeMax = 0;
                 rangeDbg = "napis: " + m.group();
             }
         }

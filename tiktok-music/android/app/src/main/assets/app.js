@@ -708,15 +708,18 @@ function originalAuthor(title) {
   return m ? m[1].replace(/[^\p{L}\p{N} _.-]/gu, "").trim() : "";
 }
 
-function tiktokTimeHtml(sec, video) {
+function tiktokTimeHtml(sec, video, est) {
+  const check = `<button class="btn ghost small" id="tt-check">🔄 Dokładnie</button>`;
+  if (sec > 0 && est) return `<span class="badge">⏱ Na TikToku</span><b>~${fmt(sec)}</b> <small class="muted">film</small> ${check}`;
   if (sec > 0) return `<span class="badge">⏱ Na TikToku</span><b>${fmt(sec)}</b> <small class="muted">cały dźwięk${video ? ` · film ${fmt(video)}` : ""}</small>`;
   if (grabForDetailsAt) return `<span class="badge">⏱ Na TikToku</span><small class="muted">⏳ sprawdzam…</small>`;
-  return `<span class="badge">⏱ Na TikToku</span><button class="btn ghost small" id="tt-check">🔄 Sprawdź</button>`;
+  return `<span class="badge">⏱ Na TikToku</span><small class="muted">mierzę… (puść film na 2–3 s)</small> <button class="btn ghost small" id="tt-check">🔄 Sprawdź</button>`;
 }
-window.updateTikTokTime = (sec, video) => {
+window.updateTikTokTime = (sec, video, est) => {
   const el = $("#tt-len");
   if (!el) return;
-  el.innerHTML = tiktokTimeHtml(sec, video);
+  if (est && cardData) return;  // mamy już dokładne dane — nie nadpisuj przybliżeniem
+  el.innerHTML = tiktokTimeHtml(sec, video, est);
   const b = $("#tt-check");
   if (b) b.onclick = () => grabDetails(cardKey);
 };
@@ -742,7 +745,7 @@ async function loadCardDetails(url) {
   }
 }
 
-window.handleNowPlaying = async (title, hint = "", dur = 0) => {
+window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   npCalls++;
   cardKey = title + "|" + hint + "|" + Date.now();
   cardData = null;
@@ -764,7 +767,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0) => {
       <p><span class="badge">🎧 Teraz na TikToku</span><b>${esc(title)}</b></p>
       ${orig && !useCap ? `<p class="muted">To „oryginalny dźwięk” bez tytułu.</p>` : ""}
       ${useCap ? `<p><span class="badge">📝 ${esc(ph.from)}</span><b>${esc(ph.raw || ph.q)}</b></p>` : ""}
-      <p id="tt-len">${tiktokTimeHtml(dur)}</p>
+      <p id="tt-len">${tiktokTimeHtml(dur, 0, est)}</p>
       <p id="full-len"><span class="badge">⏱ Cała piosenka</span><small class="muted">sprawdzam…</small></p>
       <div class="row np-actions">
         <button class="btn ghost" data-open="${esc(ytSearch(q))}">🔎 Szukaj w YouTube</button>
@@ -772,7 +775,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0) => {
       </div>
       ${fullButtonHtml(q)}
     </div></div>`;
-  window.updateTikTokTime(0);
+  window.updateTikTokTime(dur, 0, est);
   $("#np-dl").onclick = () => {
     if (cardData) return openClipModal(null, cardData);  // dane już są — od razu
     grabForModalAt = Date.now();
