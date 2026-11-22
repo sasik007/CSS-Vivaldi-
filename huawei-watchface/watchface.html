@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GX Watch Face</title>
+<style>
+  :root { --bg:#000; --green:#00ff00; --green-dim:#0a5c0a; --blue:#0078ff; --yellow:#ffe600; --text:#fff; }
+  html,body { margin:0; background:#111; color:#fff; font-family:system-ui,sans-serif; }
+  body.preview { min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:16px; box-sizing:border-box; }
+  body.export { background:transparent; }
+  .watch { width:min(466px, calc(100vw - 32px)); aspect-ratio:1; border-radius:50%; overflow:hidden; box-shadow:0 0 0 14px #222, 0 0 0 16px #444, 0 20px 60px #000; }
+  body.export .watch { width:466px; box-shadow:none; border-radius:0; }
+  svg { display:block; width:100%; height:100%; }
+  .hint { opacity:.6; font-size:14px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="watch">
+<svg id="face" viewBox="0 0 466 466" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#10181d"/>
+      <stop offset="70%" stop-color="#05080a"/>
+      <stop offset="100%" stop-color="#000"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ===== WARSTWA: TŁO ===== -->
+  <g id="layer-bg">
+    <circle cx="233" cy="233" r="233" fill="url(#bgGrad)"/>
+    <circle cx="233" cy="233" r="226" fill="none" stroke="var(--green)" stroke-width="2" filter="url(#glow)" style="stroke:#00ff00"/>
+    <circle cx="233" cy="233" r="180" fill="none" stroke="#0078ff" stroke-width="1" opacity=".35"/>
+    <g id="ticks"></g>
+    <g id="numerals" font-family="'Segoe UI',Roboto,Arial,sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="central"></g>
+    <!-- tarcze pomocnicze -->
+    <g opacity=".9">
+      <rect x="183" y="128" width="100" height="34" rx="8" fill="rgba(27,35,41,.7)" stroke="#00ff00" stroke-width="1.5"/>
+      <rect x="183" y="304" width="100" height="34" rx="8" fill="rgba(27,35,41,.7)" stroke="#0078ff" stroke-width="1.5"/>
+      <text x="233" y="117" fill="#0a5c0a" font-size="11" text-anchor="middle" font-family="Arial" letter-spacing="3">GX</text>
+    </g>
+  </g>
+
+  <!-- ===== WARSTWA: DANE (tylko podgląd – w Theme Studio dodaj widżety) ===== -->
+  <g id="layer-data" font-family="'Segoe UI',Roboto,Arial,sans-serif" text-anchor="middle" dominant-baseline="central">
+    <text id="date" x="233" y="145" fill="#ffe600" font-size="18" font-weight="700">--</text>
+    <text id="digital" x="233" y="321" fill="#fff" font-size="18" font-weight="600">--:--</text>
+  </g>
+
+  <!-- ===== WSKAZÓWKI (wszystkie ustawione na 12:00, oś obrotu = 233,233) ===== -->
+  <g id="layer-hour">
+    <path d="M233 105 L242 128 L240 248 L226 248 L224 128 Z" fill="#ffffff" stroke="#000" stroke-width="1.5"/>
+    <path d="M233 118 L236 132 L235 210 L231 210 L230 132 Z" fill="#00ff00" filter="url(#glow)"/>
+  </g>
+  <g id="layer-minute">
+    <path d="M233 42 L240 66 L238 252 L228 252 L226 66 Z" fill="#ffffff" stroke="#000" stroke-width="1.5"/>
+    <path d="M233 54 L235.5 70 L235 190 L231 190 L230.5 70 Z" fill="#0078ff" filter="url(#glow)"/>
+  </g>
+  <g id="layer-second">
+    <line x1="233" y1="275" x2="233" y2="30" stroke="#ffe600" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+    <circle cx="233" cy="233" r="9" fill="#000" stroke="#ffe600" stroke-width="3"/>
+    <circle cx="233" cy="233" r="3" fill="#ffe600"/>
+  </g>
+</svg>
+</div>
+<p class="hint">Podgląd na żywo · 466 × 466 px (Huawei Watch GT)</p>
+
+<script>
+  const NS = "http://www.w3.org/2000/svg";
+  const C = 233;
+  const ticks = document.getElementById("ticks");
+  for (let i = 0; i < 60; i++) {
+    const major = i % 5 === 0, quarter = i % 15 === 0;
+    const a = i * 6 * Math.PI / 180;
+    const r1 = 222, r2 = quarter ? 196 : major ? 202 : 212;
+    const l = document.createElementNS(NS, "line");
+    l.setAttribute("x1", C + r1 * Math.sin(a)); l.setAttribute("y1", C - r1 * Math.cos(a));
+    l.setAttribute("x2", C + r2 * Math.sin(a)); l.setAttribute("y2", C - r2 * Math.cos(a));
+    l.setAttribute("stroke", quarter ? "#ffe600" : major ? "#0078ff" : "#00ff00");
+    l.setAttribute("stroke-width", quarter ? 6 : major ? 4 : 1.5);
+    l.setAttribute("stroke-linecap", "round");
+    if (major) l.setAttribute("filter", "url(#glow)");
+    ticks.appendChild(l);
+  }
+  const nums = document.getElementById("numerals");
+  for (let h = 1; h <= 12; h++) {
+    const a = h * 30 * Math.PI / 180, quarter = h % 3 === 0, r = 172;
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", C + r * Math.sin(a)); t.setAttribute("y", C - r * Math.cos(a));
+    t.setAttribute("fill", quarter ? "#ffe600" : "#ffffff");
+    t.setAttribute("font-size", quarter ? 34 : 22);
+    t.setAttribute("opacity", quarter ? 1 : .75);
+    t.textContent = h;
+    nums.appendChild(t);
+  }
+
+  // Tryb eksportu: ?layer=bg|hour|minute|second – pokazuje tylko jedną warstwę na przezroczystym tle
+  const layer = new URLSearchParams(location.search).get("layer");
+  if (layer) {
+    document.body.className = "export";
+    document.querySelector(".hint").remove();
+    for (const id of ["bg", "data", "hour", "minute", "second"])
+      document.getElementById("layer-" + id).style.display = id === layer ? "" : "none";
+  } else {
+    document.body.className = "preview";
+    const days = ["NDZ","PON","WTO","ŚRO","CZW","PIĄ","SOB"];
+    const rot = (id, deg) => document.getElementById(id).setAttribute("transform", `rotate(${deg} ${C} ${C})`);
+    const tick = () => {
+      const d = new Date(), s = d.getSeconds() + d.getMilliseconds() / 1000, m = d.getMinutes() + s / 60, h = (d.getHours() % 12) + m / 60;
+      rot("layer-second", s * 6); rot("layer-minute", m * 6); rot("layer-hour", h * 30);
+      document.getElementById("date").textContent = `${days[d.getDay()]} ${d.getDate()}`;
+      document.getElementById("digital").textContent = d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
+</script>
+</body>
+</html>
