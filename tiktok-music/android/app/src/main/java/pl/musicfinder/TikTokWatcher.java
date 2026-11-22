@@ -55,6 +55,7 @@ public class TikTokWatcher extends AccessibilityService {
     private static final Pattern COPY_RE = Pattern.compile("^(kopiuj link|skopiuj link|copy link)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final Handler h = new Handler(Looper.getMainLooper());
     private int grabStep = 0;
+    private long grabDeadline = 0;
 
     @Override
     protected void onServiceConnected() {
