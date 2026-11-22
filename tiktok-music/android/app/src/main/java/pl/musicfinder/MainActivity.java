@@ -98,7 +98,6 @@ public class MainActivity extends Activity {
 
     static final String SHORTCUT_ID = "find_song";
     static final String EXTRA_GRAB = "grab_result";
-    static final String EXTRA_COMMENTS = "comments_result";
     /** Interfejs ładujemy z wirtualnego adresu https (potrzebne, by działał odtwarzacz YouTube). */
     static final String APP_HOST = "appassets.musicfinder.local";
     static final Pattern YT_LENGTH = Pattern.compile("\"lengthText\":\\{.{0,300}?\"simpleText\":\"([\\d:]+)\"");
@@ -107,9 +106,6 @@ public class MainActivity extends Activity {
     private WebView ui;
     private WebView scraper;
     private FrameLayout root;
-    private WebView cmView;                 // ukryta przeglądarka do komentarzy
-    private Runnable cmPoll = null;
-    private int cmReqId = 0;
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean uiReady = false;
     private String pendingShare = null;
@@ -245,13 +241,6 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (intent.hasExtra(EXTRA_COMMENTS)) {
-            // powrót po odczytaniu komentarzy w TikToku
-            boolean ok = intent.getBooleanExtra(EXTRA_COMMENTS, false);
-            String json = getSharedPreferences(TikTokWatcher.PREFS, MODE_PRIVATE).getString(TikTokWatcher.KEY_COMMENTS, "[]");
-            ui.evaluateJavascript("window.handleComments && window.handleComments(" + json + "," + ok + ")", null);
-            return;
-        }
         if (intent.hasExtra(EXTRA_GRAB)) {
             // powrót po automatycznym „Kopiuj link” w TikToku
             boolean ok = intent.getBooleanExtra(EXTRA_GRAB, false);
@@ -443,104 +432,6 @@ public class MainActivity extends Activity {
         };
         main.postDelayed(scrapeWatchdog, 25_000);
         main.postDelayed(scrapePoll, 1200);
-    }
-
-    // ------------------------------------------------------------------ komentarze w tle (niewidocznie)
-
-    /** Przechwytuje odpowiedzi /api/comment/list, które strona TikToka sama pobiera. */
-    static final String CM_HOOK = "(function(){if(window.__mf)return;window.__mf={c:[],done:false,started:false};"
-            + "var add=function(j){try{(j.comments||[]).forEach(function(c){if(c&&c.text)window.__mf.c.push(c.text);});}catch(e){}};"
-            + "var of=window.fetch;if(of)window.fetch=function(){var a=arguments;return of.apply(this,a).then(function(r){try{"
-            + "var u=(a[0]&&a[0].url)||String(a[0]);if(u.indexOf('/api/comment/list')>=0)r.clone().json().then(add).catch(function(){});}catch(e){}return r;});};"
-            + "var oo=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){this.__u=u;return oo.apply(this,arguments);};"
-            + "var os=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){var x=this;x.addEventListener('load',function(){"
-            + "try{if(String(x.__u).indexOf('/api/comment/list')>=0)add(JSON.parse(x.responseText));}catch(e){}});return os.apply(this,arguments);};})()";
-
-    /** Stan strony: id filmu (gdy gotowa) i liczba zebranych komentarzy. */
-    static final String CM_STATUS = "(function(){try{" + CM_HOOK + ";"
-            + "var id=(location.pathname.match(/video\\/(\\d+)/)||[])[1]||'';"
-            + "return JSON.stringify({id:id,ready:document.readyState==='complete',n:window.__mf.c.length,done:window.__mf.done,started:window.__mf.started});"
-            + "}catch(e){return null;}})()";
-
-    /** Doczytuje kolejne strony komentarzy (zapytania podpisuje sama strona TikToka). */
-    static String cmPager(String videoId) {
-        return "(function(){if(!window.__mf||window.__mf.started)return;window.__mf.started=true;var cursor=0,pages=0;"
-                + "function next(){if(pages>=8){window.__mf.done=true;return;}var x=new XMLHttpRequest();"
-                + "x.open('GET','/api/comment/list/?aid=1988&aweme_id=" + videoId + "&count=50&cursor='+cursor);"
-                + "x.onload=function(){var j=null;try{j=JSON.parse(x.responseText);}catch(e){}"
-                + "if(!j||!j.comments){window.__mf.done=true;return;}pages++;"
-                + "if(j.has_more){cursor=j.cursor;next();}else window.__mf.done=true;};"
-                + "x.onerror=function(){window.__mf.done=true;};x.send();}next();})()";
-    }
-
-    static final String CM_COLLECT = "(function(){var t=(window.__mf?window.__mf.c:[]).slice();"
-            + "document.querySelectorAll('[data-e2e=\"comment-level-1\"],[data-e2e=\"comment-text\"]').forEach(function(e){t.push(e.innerText);});"
-            + "var seen={},out=[];t.forEach(function(s){s=(s||'').trim();if(s&&!seen[s]){seen[s]=1;out.push(s);}});return JSON.stringify(out.slice(0,600));})()";
-
-    @SuppressLint("SetJavaScriptEnabled")
-    private void startCommentsFetch(int id, String url) {
-        if (cmView == null) {
-            cmView = new WebView(this);
-            WebSettings cs = cmView.getSettings();
-            cs.setJavaScriptEnabled(true);
-            cs.setDomStorageEnabled(true);
-            cs.setUserAgentString(DESKTOP_UA);
-            cs.setBlockNetworkImage(true);
-            cs.setMediaPlaybackRequiresUserGesture(true);
-            CookieManager.getInstance().setAcceptThirdPartyCookies(cmView, true);
-            cmView.setWebViewClient(new WebViewClient() {
-                @Override
-                public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                    String sc = r.getUrl().getScheme();
-                    return !("http".equals(sc) || "https".equals(sc));
-                }
-
-                @Override
-                public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) {
-                    v.evaluateJavascript(CM_HOOK, null);
-                }
-            });
-            cmView.setAlpha(0f);
-            root.addView(cmView, 0, new FrameLayout.LayoutParams(1, 1));
-        }
-        if (cmPoll != null) { main.removeCallbacks(cmPoll); reply(cmReqId, false, "Anulowano"); }
-        cmReqId = id;
-        final long deadline = System.currentTimeMillis() + 20_000;
-        cmView.onResume();
-        cmView.resumeTimers();
-        cmView.loadUrl(url);
-        final Runnable[] self = new Runnable[1];
-        cmPoll = self[0] = () -> {
-            if (cmPoll != self[0]) return;
-            main.postDelayed(self[0], 800);
-            boolean timeUp = System.currentTimeMillis() > deadline;
-            cmView.evaluateJavascript(CM_STATUS, res -> {
-                if (cmPoll != self[0]) return;
-                String js = decodeJsResult(res);
-                boolean done = false;
-                try {
-                    if (js != null) {
-                        JSONObject o = new JSONObject(js);
-                        String vid = o.optString("id");
-                        if (o.optBoolean("ready") && !vid.isEmpty() && !o.optBoolean("started"))
-                            cmView.evaluateJavascript(cmPager(vid), null);
-                        done = o.optBoolean("done");
-                    }
-                } catch (Exception ignored) { }
-                if (done || timeUp) {
-                    main.removeCallbacks(self[0]);
-                    cmPoll = null;
-                    cmView.evaluateJavascript(CM_COLLECT, r2 -> {
-                        String texts = decodeJsResult(r2);
-                        reply(id, true, texts == null ? "[]" : texts);
-                        cmView.loadUrl("about:blank");
-                        cmView.clearCache(true);
-                        cmView.clearHistory();
-                    });
-                }
-            });
-        };
-        main.postDelayed(cmPoll, 1500);
     }
 
     // ------------------------------------------------------------------ szybki odczyt bez przeglądarki
@@ -1169,7 +1060,6 @@ public class MainActivity extends Activity {
                 o.put("scanAgo", ago(p.getLong(TikTokWatcher.KEY_DBG_TIME, 0)));
                 String d = p.getString(TikTokWatcher.KEY_DBG, null);
                 if (d != null) o.put("scan", new JSONObject(d));
-                o.put("comments", p.getString(TikTokWatcher.KEY_CM_DBG, ""));
                 o.put("grabs", p.getInt("grab_count", 0) + " (ostatnie: " + p.getString("grab_log", "-") + ")");
                 o.put("android", Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")");
                 o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
@@ -1221,27 +1111,6 @@ public class MainActivity extends Activity {
                 }
             });
             return TikTokWatcher.requestCopyLink(isInMultiWindowMode());
-        }
-
-        /** Pobiera komentarze filmu w tle, niewidocznie. Zwraca JSON [tekst, …]. */
-        @JavascriptInterface
-        public void fetchComments(int id, String url) {
-            main.post(() -> startCommentsFetch(id, url));
-        }
-
-        /** Otwiera komentarze bieżącego filmu w TikToku, czyta je i wraca. false = usługa wyłączona. */
-        @JavascriptInterface
-        public boolean readComments() {
-            if (!watcherEnabled()) return false;
-            boolean multi = isInMultiWindowMode();
-            if (!multi) main.post(() -> {
-                for (String pkg : new String[]{"com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.zhiliaoapp.musically.go"}) {
-                    Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-                    if (i == null) continue;
-                    try { startActivity(i); break; } catch (Exception ignored) { }
-                }
-            });
-            return TikTokWatcher.requestComments(multi);
         }
 
         /** Wraca do TikToka, żeby skopiować link do bieżącego filmu. */

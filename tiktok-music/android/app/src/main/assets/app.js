@@ -19,7 +19,7 @@ function callP(onProgress, method, ...args) {
 }
 
 // --- przełączniki źródeł
-const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails2: false, commentsAuto: false };
+const src = { itunes: true, youtube: true, openverse: true, archive: true, autodetails2: false };
 try { Object.assign(src, JSON.parse(localStorage.getItem("sources") || "{}")); } catch {}
 document.querySelectorAll("[data-src]").forEach(cb => {
   cb.checked = !!src[cb.dataset.src];
@@ -252,7 +252,7 @@ function cleanQuery(q) {
 /** Ustawia zapytanie YouTube na karcie; pusty = brak tytułu (przyciski nieaktywne). */
 function setYtQuery(q) {
   q = cleanQuery(q);
-  if (q && cardVersion && !norm(q).includes(norm(cardVersion))) q = `${q} ${cleanQuery(cardVersion)}`;
+  if (q && cardVersion && !q.toLowerCase().includes(cleanQuery(cardVersion).toLowerCase())) q = `${q} ${cleanQuery(cardVersion)}`;
   const box = $("#video-box");
   box.querySelectorAll("[data-yt-search]").forEach(b => {
     b.disabled = !q;
@@ -487,7 +487,7 @@ window.grabFailed = () => {
   setStatus("Nie udało się automatycznie skopiować linku. W TikToku: Udostępnij → Kopiuj link i wróć — pobierze się samo.", true);
 };
 let autoDownloadAt = 0, grabForModalAt = 0, grabForDetailsAt = 0;
-let cardData = null, cardKey = "", cardLink = "", grabForCommentsAt = 0;   // dane filmu z bieżącej karty „Teraz na TikToku”
+let cardData = null, cardKey = "", cardLink = "";   // dane filmu z bieżącej karty „Teraz na TikToku”
 
 function isOriginal(m) {
   const t = (m.title || "").toLowerCase();
@@ -547,7 +547,6 @@ async function analyze(url) {
     }
     await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : orig ? null : { title: m.title, artist: m.author }, useCap ? ph.q : ytQuery);
     cardKey = "link|" + url; cardLink = url; cardData = d;
-    maybeComments(cardKey);
     // „Pobierz urywek” z „Teraz na TikToku” → po skopiowaniu linku pobieramy od razu
     if (autoDl) downloadCurrent();
   } catch (err) {
@@ -614,15 +613,13 @@ window.handleShared = (text) => {
   if (!m) return setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
   // jeden skopiowany link obsługuje WSZYSTKIE czekające funkcje (bez drugiego kopiowania)
   const now = Date.now();
-  const wantComments = grabForCommentsAt && now - grabForCommentsAt < 60_000;
   const wantDetails = grabForDetailsAt && now - grabForDetailsAt < 60_000;
   const wantModal = grabForModalAt && now - grabForModalAt < 5 * 60_000;
-  if (wantComments || wantDetails || wantModal) {
+  if (wantDetails || wantModal) {
     linkInFlight = 0;
-    grabForCommentsAt = grabForDetailsAt = grabForModalAt = 0;
+    grabForDetailsAt = grabForModalAt = 0;
     cardLink = m[0];
-    if (wantDetails || wantComments) loadCardDetails(m[0]);   // czas na karcie
-    if (wantComments) fetchCommentsFor(m[0]);                  // komentarze w tle
+    if (wantDetails) loadCardDetails(m[0]);                    // czas na karcie
     if (wantModal) {                                           // okienko pobierania
       const btn = $("#np-dl");
       if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
@@ -842,7 +839,6 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   cardData = null;
   cardLink = "";
   grabForDetailsAt = 0;
-  grabForCommentsAt = 0;
   const myKey = cardKey;
   // w okienku obok TikToka: po 1,5 s stabilnego filmu pobierz dane (czas) automatycznie
   if (src.autodetails2 && Android.watcherEnabled() && Android.isMultiWindow && Android.isMultiWindow())
@@ -893,13 +889,11 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   if (orig && !hq) {
     lastCatalog = []; lastFree = [];
     setStatus("To „oryginalny dźwięk” bez tytułu — spróbuj 🎙️ Rozpoznaj (Shazam) albo 🔎 Szukaj w YouTube.", true);
-    await updateFullUI(null, q);
-    return maybeComments(myKey);
+    return updateFullUI(null, q);
   }
   await searchAll(q, headArtist ? `${headArtist} – ${headTitle}` : headTitle);
   const parts = title.split(/\s+-\s+/);
   await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
-  maybeComments(myKey);
 };
 
 // --- baner włączenia wykrywania
@@ -932,7 +926,6 @@ $("#btn-diag").onclick = () => {
     `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
     `Pasek postępu filmu: ${sc.range || "-"}`,
     `Kopiowania linku: ${d.grabs || "-"}`,
-    `Komentarze (ostatnia próba): ${d.comments ? "\n  " + d.comments.trim().split("\n").join("\n  ") : "-"}`,
     `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
     ``,
     `Kandydaci na nazwę dźwięku (✓ = użyty, bo jest na ekranie):`,
@@ -997,136 +990,3 @@ $("#btn-settings").onclick = () => {
   d.scrollIntoView({ behavior: "smooth", block: "start" });
 };
 
-// --- komentarze → tytuł piosenki (PL, EN, ES, PT, DE, FR, IT)
-const QUESTION_RE = /(jak[aą] to (jest )?piosenk|jak si[eę] nazywa|co to za (piosenk|utw[oó]r|nuta|kawa[lł]ek)|tytu[lł]\s*\?|nazwa\s*\?|what('?s| is) (the|this) song|song name\s*\?|name of (the|this) song|what song|¿?c[oó]mo se llama|nombre de la canci[oó]n\s*\?|qual (é|e) o nome|wie hei[sß]t|welches lied|quel(le)? est (le titre|la chanson)|come si chiama|anyone know)/i;
-const KEYWORD_RE = /(?:^|\b)(?:piosenka|utw[oó]r|tytu[lł]|nazwa|nuta|kawa[lł]ek|song|track|title|canci[oó]n|tema|m[uú]sica|can[cç][aã]o|lied|titel|chanson|titre|morceau|canzone|titolo|brano)\s*(?:to|is|es|é|ist|est|è)?\s*[:：=\-–—]?\s+["„“”'«]?([^"„“”'»\n?]{2,70})/i;
-const CALLED_RE = /(?:nazywa si[eę]|it'?s called|is called|se llama|chama-se|se chama|hei[sß]t|s'appelle|si chiama)\s*[:：]?\s*["„“”'«]?([^"„“”'»\n?]{2,70})/i;
-const BY_RE = /^["„“”'«]?([^"„“”'»\n]{2,50}?)["„“”'»]?\s+(?:by|od|von|de|di|par)\s+([A-ZĄĆĘŁŃÓŚŹŻ0-9@][^\n,.!?]{1,40})$/;
-const DASH_RE = /^(.{2,45}?)\s+[-–—]\s+(.{2,55})$/;
-const QUOTE_RE = /["„“«]([^"„“”»\n]{2,60})["”»]/;
-const NOTE_RE = /^[♬♫♪🎵🎶]\s*(.{2,70})$/u;
-const JUNK_RE = /^(\d+([.,]\d+)?\s*(tys\.?|mln|k|m)?|odpowiedz|reply|responder|antworten|répondre|rispondi|zobacz \d+|view \d+|ver \d+|\d+\s*(min|godz|dni|h|d|w|tyg)\.?( temu)?|autor|creator|polubione przez|liked by)$/i;
-
-function cleanTitle(t) {
-  return stripEmoji(t || "").replace(/@\S+/g, " ").replace(/#\S+/g, " ")
-    .replace(/\b(lol|xd|haha+|pls|plz)\b/gi, " ")
-    .replace(/^(to jest|to|it'?s|it is|this is|that'?s|es|é|ist|c'est|è)\s+/i, "")
-    .replace(/[!?.,;:]+$/g, "").replace(/\s+/g, " ").trim();
-}
-
-/** Zwraca propozycje [{title, artist, q, count}] posortowane od najczęstszej. Pary „A - B” bez ustalonej kolejności. */
-function mineComments(texts) {
-  const found = new Map();
-  const ok = (x) => x.length >= 2 && x.length <= 70 && !/^\d+$/.test(x) && x.split(" ").length <= 9 && !QUESTION_RE.test(x);
-  const put = (key, entry) => { const cur = found.get(key); if (cur) cur.count++; else found.set(key, { ...entry, count: 1 }); };
-  const addOne = (t) => { t = cleanTitle(t); if (ok(t)) put(norm(t), { title: t, artist: "", single: true }); };
-  const addPair = (a, b, ordered) => {   // ordered: a = tytuł, b = wykonawca („X by Y”)
-    a = cleanTitle(a); b = cleanTitle(b);
-    if (!ok(a) || !ok(b)) return addOne(a + " " + b);
-    const key = [norm(a), norm(b)].sort().join("|");
-    put(key, ordered ? { title: a, artist: b } : { title: b, artist: a });
-  };
-  const addVal = (v) => { const d = v.match(DASH_RE), b = v.match(BY_RE); if (d) addPair(d[1], d[2]); else if (b) addPair(b[1], b[2], true); else addOne(v); };
-
-  for (const raw of texts || []) {
-    const t = stripEmoji(String(raw)).replace(/\s+/g, " ").trim();
-    if (t.length < 3 || t.length > 220 || JUNK_RE.test(t)) continue;
-    let m;
-    if ((m = String(raw).trim().match(NOTE_RE))) { addVal(m[1]); continue; }
-    if (QUESTION_RE.test(t) || /\?\s*$/.test(t)) continue;   // pytanie bez odpowiedzi
-    if ((m = t.match(CALLED_RE))) { addVal(m[1]); continue; }
-    if ((m = t.match(KEYWORD_RE))) { addVal(m[1]); continue; }
-    if ((m = t.match(DASH_RE)) && !/\d{1,2}:\d{2}/.test(t)) { addPair(m[1], m[2]); continue; }
-    if ((m = t.match(BY_RE))) { addPair(m[1], m[2], true); continue; }
-    if ((m = t.match(QUOTE_RE))) addOne(m[1]);
-  }
-  // pojedynczy tytuł, który występuje też w parze → dolicz do pary
-  for (const [k, e] of [...found]) {
-    if (!e.single) continue;
-    for (const [k2, e2] of found) {
-      if (e2.single || !k2.split("|").includes(k)) continue;
-      e2.count += e.count; found.delete(k); break;
-    }
-  }
-  return [...found.values()].map(e => ({ title: e.title, artist: e.artist, q: `${e.artist} ${e.title}`.trim(), count: e.count }))
-    .sort((a, b) => b.count - a.count);
-}
-
-// --- szukanie tytułu w komentarzach, gdy nic nie znaleziono
-let commentsFor = "";
-function commentsFactHtml(state) {
-  return `<span class="badge">💬 Komentarze</span>` + (state === "busy"
-    ? `<small class="muted">⏳ czytam w tle…</small>`
-    : `<small class="muted cm-msg">${state || "może ktoś podał tytuł"}</small><button class="btn ghost mini" id="cm-btn">Szukaj</button>`);
-}
-function showCommentsFact(state) {
-  let el = $("#cm-fact");
-  if (!el) {
-    const list = $("#video-box .facts-list");
-    if (!list) return;
-    list.insertAdjacentHTML("beforeend", `<div class="fact" id="cm-fact"></div>`);
-    el = $("#cm-fact");
-  }
-  el.innerHTML = commentsFactHtml(state);
-  const b = $("#cm-btn");
-  if (b) b.onclick = () => startComments(cardKey);
-}
-function startComments(key) {
-  if (key !== cardKey) return;
-  if (cardLink) return fetchCommentsFor(cardLink);   // tylko link TEGO filmu (nie poprzedniego)
-  // brak linku → skopiuj go raz (krótkie mignięcie „Udostępnij”), resztę robimy w tle
-  showCommentsFact("busy");
-  grabForCommentsAt = Date.now();
-  if (!requestLink("komentarze")) {
-    grabForCommentsAt = 0;
-    showCommentsFact("włącz usługę wykrywania w Ułatwieniach dostępu");
-  }
-}
-/** Wszystkie komentarze filmu pobrane w tle (niewidoczna przeglądarka). */
-async function fetchCommentsFor(link) {
-  const key = cardKey;
-  commentsFor = key;
-  showCommentsFact("busy");
-  try {
-    const texts = JSON.parse(await call("fetchComments", link));
-    if (key !== cardKey) return;
-    await window.handleComments(texts, texts.length > 0);
-  } catch (err) {
-    if (key === cardKey) { commentsFor = ""; showCommentsFact("nie udało się pobrać komentarzy"); }
-  }
-}
-/** Po nieudanym wyszukaniu: w okienku obok TikToka czytaj komentarze automatycznie, inaczej przycisk. */
-function maybeComments(key) {
-  if (key !== cardKey || verifiedBest(lastTarget)) return;
-  showCommentsFact();
-  // link znany → komentarze w tle od razu (nic nie widać)
-  if (cardLink) return fetchCommentsFor(cardLink);
-  if (src.commentsAuto && Android.isMultiWindow && Android.isMultiWindow() && Android.watcherEnabled())
-    setTimeout(() => { if (key === cardKey && document.visibilityState === "visible" && $("#modal").hidden) startComments(key); }, 1200);
-}
-
-window.handleComments = async (texts, opened) => {
-  if (!commentsFor || commentsFor !== cardKey) return;
-  commentsFor = "";
-  if (!opened) return showCommentsFact("TikTok nie pokazał komentarzy — spróbuj ponownie");
-  const cands = mineComments(texts).slice(0, 4);
-  if (!cands.length) return showCommentsFact(`brak tytułu w ${texts.length} przeczytanych napisach — przewiń komentarze i spróbuj ponownie`);
-  showCommentsFact("busy");
-  // sprawdź propozycje w katalogu — wybierz pierwszą potwierdzoną
-  let pick = null, song = null;
-  for (const c of cands.slice(0, 3)) {
-    try {
-      const r = await searchSongs(c.q);
-      song = r.find(x => isSameSong(x, c) || isSameSong(x, { title: c.artist, artist: c.title }) || (!c.artist && isSameSong(x, { title: c.title })));
-      if (song) { pick = c; break; }
-    } catch {}
-  }
-  if (!pick) pick = cands[0];
-  const people = pick.count === 1 ? "1 osoba" : pick.count < 5 ? `${pick.count} osoby` : `${pick.count} osób`;
-  const t = song ? { title: song.title, artist: song.artist } : { title: pick.title, artist: pick.artist };
-  $("#cm-fact").innerHTML = `<span class="badge">💬 Z komentarzy</span><b>${esc(t.artist ? t.artist + " – " + t.title : t.title)}</b> <small class="muted">(${people})</small>`;
-  $("#np-title").textContent = t.title;
-  $("#np-artist").textContent = t.artist || "";
-  await searchAll(`${t.artist || ""} ${t.title}`.trim(), t.artist ? `${t.artist} – ${t.title}` : t.title);
-  await updateFullUI(t, `${t.artist || ""} ${t.title}`.trim());
-};
