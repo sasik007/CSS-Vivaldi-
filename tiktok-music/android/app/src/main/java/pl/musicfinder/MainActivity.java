@@ -1170,6 +1170,7 @@ public class MainActivity extends Activity {
                 String d = p.getString(TikTokWatcher.KEY_DBG, null);
                 if (d != null) o.put("scan", new JSONObject(d));
                 o.put("comments", p.getString(TikTokWatcher.KEY_CM_DBG, ""));
+                o.put("grabs", p.getInt("grab_count", 0) + " (ostatnie: " + p.getString("grab_log", "-") + ")");
                 o.put("android", Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")");
                 o.put("device", Build.MANUFACTURER + " " + Build.MODEL);
                 return o.toString();
@@ -1197,9 +1198,17 @@ public class MainActivity extends Activity {
 
         /** Automatycznie: TikTok → Udostępnij → Kopiuj link → powrót. false = usługa wyłączona. */
         @JavascriptInterface
-        public boolean grabTikTokLink() {
+        public boolean grabTikTokLink(String why) {
             if (!watcherEnabled()) return false;
+            if (TikTokWatcher.isGrabbing()) return true;   // kopiowanie już trwa — nie kopiuj drugi raz
             grabbedByUs = true;
+            // licznik do diagnostyki: ile razy i po co kopiowano link
+            SharedPreferences gp = getSharedPreferences("mf", MODE_PRIVATE);
+            int n = gp.getInt("grab_count", 0) + 1;
+            String log = new java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(new java.util.Date()) + " " + why;
+            String prev = gp.getString("grab_log", "");
+            gp.edit().putInt("grab_count", n).putString("grab_log", (log + (prev.isEmpty() ? "" : " | " + prev)).substring(0,
+                    Math.min(200, (log + (prev.isEmpty() ? "" : " | " + prev)).length()))).apply();
             // ten sam link mógł już być wyszukany — pozwól go użyć ponownie
             getSharedPreferences("mf", MODE_PRIVATE).edit().remove("last").apply();
             main.post(() -> {

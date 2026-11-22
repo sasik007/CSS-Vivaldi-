@@ -612,24 +612,24 @@ $("#btn-paste").onclick = () => {
 window.handleShared = (text) => {
   const m = (text || "").match(TT_RE);
   if (!m) return setStatus("Udostępniony tekst nie zawiera linku do TikToka.", true);
-  // link skopiowany dla komentarzy → dane karty + komentarze w tle
-  if (grabForCommentsAt && Date.now() - grabForCommentsAt < 60_000) {
-    grabForCommentsAt = 0;
-    loadCardDetails(m[0]);
-    return fetchCommentsFor(m[0]);
-  }
-  // link skopiowany automatycznie dla danych karty (czas od razu)
-  if (grabForDetailsAt && Date.now() - grabForDetailsAt < 60_000) {
-    grabForDetailsAt = 0;
-    return loadCardDetails(m[0]);
-  }
-  // link skopiowany po „Pobierz urywek” z karty → okienko z danymi, karta zostaje bez zmian
-  if (grabForModalAt && Date.now() - grabForModalAt < 5 * 60_000) {
-    grabForModalAt = 0;
-    const btn = $("#np-dl");
-    if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
-    setStatus("");
-    return openClipModal(m[0]);
+  // jeden skopiowany link obsługuje WSZYSTKIE czekające funkcje (bez drugiego kopiowania)
+  const now = Date.now();
+  const wantComments = grabForCommentsAt && now - grabForCommentsAt < 60_000;
+  const wantDetails = grabForDetailsAt && now - grabForDetailsAt < 60_000;
+  const wantModal = grabForModalAt && now - grabForModalAt < 5 * 60_000;
+  if (wantComments || wantDetails || wantModal) {
+    linkInFlight = 0;
+    grabForCommentsAt = grabForDetailsAt = grabForModalAt = 0;
+    cardLink = m[0];
+    if (wantDetails || wantComments) loadCardDetails(m[0]);   // czas na karcie
+    if (wantComments) fetchCommentsFor(m[0]);                  // komentarze w tle
+    if (wantModal) {                                           // okienko pobierania
+      const btn = $("#np-dl");
+      if (btn) { btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek"; }
+      setStatus("");
+      openClipModal(m[0]);
+    }
+    return;
   }
   analyze(m[0]);
 };
@@ -802,12 +802,23 @@ window.updateTikTokTime = (sec, video, est) => {
   if (b) b.onclick = () => grabDetails(cardKey);
 };
 
+/** Jedno kopiowanie linku naraz — kolejne prośby czekają na ten sam link. */
+let linkInFlight = 0;
+function requestLink(why) {
+  if (cardLink) { setTimeout(() => window.handleShared(cardLink), 0); return true; }  // już znamy link
+  if (linkInFlight && Date.now() - linkInFlight < 15000) return true;                  // kopiowanie trwa
+  linkInFlight = Date.now();
+  const ok = Android.grabTikTokLink(why);
+  if (!ok) linkInFlight = 0;
+  return ok;
+}
+
 /** Pobiera dane bieżącego filmu (link przez „Kopiuj link”) — czas od razu na karcie. */
 function grabDetails(key) {
   if (key !== cardKey || cardData) return;
   grabForDetailsAt = Date.now();
   window.updateTikTokTime(0);
-  if (!Android.grabTikTokLink()) { grabForDetailsAt = 0; window.updateTikTokTime(0); }
+  if (!requestLink("czas")) { grabForDetailsAt = 0; window.updateTikTokTime(0); }
 }
 async function loadCardDetails(url) {
   const key = cardKey;
@@ -867,11 +878,13 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   window.updateTikTokTime(dur, 0, est);
   $("#np-dl").onclick = () => {
     if (cardData) return openClipModal(null, cardData);  // dane już są — od razu
+    if (grabForModalAt && Date.now() - grabForModalAt < 15000) return;  // już czekamy na link
     grabForModalAt = Date.now();
     const btn = $("#np-dl");
     btn.disabled = true; btn.textContent = "⏳ Pobieram link z TikToka…";
     setStatus("⏳ Kopiuję link do filmu w TikToku — za chwilę wrócę i pobiorę.");
-    if (!Android.grabTikTokLink()) {
+    if (!requestLink("pobierz")) {
+      grabForModalAt = 0;
       btn.disabled = false; btn.textContent = "⬇️ Pobierz urywek";
       setStatus("👉 W TikToku: Udostępnij → Kopiuj link, potem wróć tutaj — pobieranie ruszy samo.");
       Android.backToTikTok();
@@ -918,6 +931,7 @@ $("#btn-diag").onclick = () => {
     `Wykryty dźwięk: ${d.title ? `„${d.title}” (${ago(d.titleAgo)})` : "brak"}`,
     `Okna TikToka: ${sc.windows ?? "-"}, elementów: ${sc.nodes ?? "-"}`,
     `Pasek postępu filmu: ${sc.range || "-"}`,
+    `Kopiowania linku: ${d.grabs || "-"}`,
     `Komentarze (ostatnia próba): ${d.comments ? "\n  " + d.comments.trim().split("\n").join("\n  ") : "-"}`,
     `Telefon: ${d.device || "?"}, Android ${d.android || "?"}`,
     ``,
@@ -1059,12 +1073,11 @@ function showCommentsFact(state) {
 }
 function startComments(key) {
   if (key !== cardKey) return;
-  const link = cardLink || (current && current.page) || "";
-  if (link) return fetchCommentsFor(link);
+  if (cardLink) return fetchCommentsFor(cardLink);   // tylko link TEGO filmu (nie poprzedniego)
   // brak linku → skopiuj go raz (krótkie mignięcie „Udostępnij”), resztę robimy w tle
   showCommentsFact("busy");
   grabForCommentsAt = Date.now();
-  if (!Android.grabTikTokLink()) {
+  if (!requestLink("komentarze")) {
     grabForCommentsAt = 0;
     showCommentsFact("włącz usługę wykrywania w Ułatwieniach dostępu");
   }

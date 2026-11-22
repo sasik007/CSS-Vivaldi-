@@ -216,9 +216,16 @@ public class TikTokWatcher extends AccessibilityService {
     }
 
     /** Prosi usługę o skopiowanie linku do bieżącego filmu w TikToku. false = usługa wyłączona. */
+    /** Czy właśnie trwa „Udostępnij → Kopiuj link”. */
+    static boolean isGrabbing() {
+        TikTokWatcher w = instance;
+        return w != null && w.grabStep != 0;
+    }
+
     static boolean requestCopyLink(boolean tiktokVisible) {
         TikTokWatcher w = instance;
         if (w == null) return false;
+        if (w.grabStep != 0) return true;   // już kopiujemy — drugi raz nie
         w.h.post(() -> w.startGrab(tiktokVisible));
         return true;
     }
