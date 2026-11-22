@@ -532,7 +532,7 @@ async function analyze(url) {
 
     const ph = parseHint(d.desc);
     cardVersion = detectVersion(m.title, d.desc);
-    const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
+    const useCap = !!ph.q && orig;
     if (useCap) {
       current.hint = ph.q;
       current.hintTag = ph;
@@ -744,10 +744,6 @@ const stripEmoji = (t) => t.replace(/[\p{Extended_Pictographic}\uFE0F]/gu, " ").
  */
 function parseHint(hint) {
   const lines = (hint || "").split(/\n/).map(stripEmoji).filter(Boolean);
-  for (const l of lines) {
-    const m = l.match(SEARCH_HINT);
-    if (m) { const t = m[1].trim(); return { q: t, artist: "", title: t, raw: t, from: "TikTok podpowiada" }; }
-  }
   for (let line of lines) {
     line = line.split(/\s[|•]\s|…|\.\.\./)[0].replace(/#\S+/g, "").trim();
     const m = line.match(/^(.{2,60}?)\s+[–—-]\s+(.{2,60}?)\s*$/);
@@ -770,6 +766,11 @@ function parseHint(hint) {
       COVER_TAG.lastIndex = 0;
       if (t.length >= 2) return { q: `${artist} ${t}`.trim(), artist: artist.trim(), title: t, raw: line, from: "Z opisu filmu" };
     }
+  }
+  // podpowiedź z paska „Wyszukiwanie · …” opisuje temat filmu — dopiero po wzorach z opisu
+  for (const l of lines) {
+    const m = l.match(SEARCH_HINT);
+    if (m) { const t = m[1].trim(); return { q: t, artist: "", title: t, raw: t, from: "TikTok podpowiada" }; }
   }
   const tags = [...(hint || "").matchAll(/#([\p{L}\p{N}_]+)/gu)].map(m => m[1]).filter(t => !GENERIC_TAGS.test(t));
   const words = tags.slice(0, 2).map(t => t.replace(/_/g, " ").replace(/([a-ząćęłńóśźż])([A-ZĄĆĘŁŃÓŚŹŻ])/g, "$1 $2"));
@@ -832,6 +833,16 @@ async function loadCardDetails(url) {
   }
 }
 
+/** Nazwa dźwięku z TikToka → {title, artist}. PL: „Tytuł wykonawcy Wykonawca”, EN: „Title by Artist”, „Tytuł - Wykonawca”. */
+function parseSound(label) {
+  const t = stripEmoji(label || "").replace(/\s+/g, " ").trim();
+  let m = t.match(/^(.+?)\s+(?:wykonawcy|by)\s+(.+)$/i);
+  if (m) return { title: m[1].trim(), artist: m[2].trim() };
+  m = t.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (m) return { title: m[1].trim(), artist: m[2].trim() };
+  return { title: t, artist: "" };
+}
+
 window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   cardVersion = detectVersion(title, hint);
   npCalls++;
@@ -848,12 +859,12 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
   const orig = /original sound|oryginalny dźwięk|dźwięk oryginalny|son original|sonido original/i.test(title);
   const ph = parseHint(hint);
   // napisy z TikToka mają pierwszeństwo (hashtagi tylko przy „oryginalnym dźwięku”)
-  const useCap = !!ph.q && (orig || ph.from !== "Z hashtagów");
+  const useCap = !!ph.q && orig;   // dźwięk z tytułem zawsze wygrywa z opisem/podpowiedziami
   const hq = useCap ? ph.q : "";
-  const q = useCap ? ph.q : orig ? "" : title.replace(/\s+-\s+/g, " ");
-  const parts0 = title.split(/\s+-\s+/);
-  const headTitle = useCap ? (ph.title || ph.q) : orig ? "Nieznany utwór" : parts0[0];
-  const headArtist = useCap ? (ph.artist || "") : orig ? "" : parts0.slice(1).join(" ");
+  const snd = parseSound(title);
+  const q = useCap ? ph.q : orig ? "" : `${snd.artist} ${snd.title}`.trim();
+  const headTitle = useCap ? (ph.title || ph.q) : orig ? "Nieznany utwór" : snd.title;
+  const headArtist = useCap ? (ph.artist || "") : orig ? "" : snd.artist;
   $("#video-box").innerHTML = `
     <div class="np">
       <div class="np-head"><span class="live-dot"></span>Teraz na TikToku</div>
@@ -892,8 +903,7 @@ window.handleNowPlaying = async (title, hint = "", dur = 0, est = false) => {
     return updateFullUI(null, q);
   }
   await searchAll(q, headArtist ? `${headArtist} – ${headTitle}` : headTitle);
-  const parts = title.split(/\s+-\s+/);
-  await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : { title: parts[0], artist: parts.slice(1).join(" ") }, q);
+  await updateFullUI(useCap ? { title: ph.title, artist: ph.artist } : snd, q);
 };
 
 // --- baner włączenia wykrywania
