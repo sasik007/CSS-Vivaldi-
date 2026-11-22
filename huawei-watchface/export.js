@@ -9,6 +9,8 @@ const path = require('path');
     await p.goto(url + '?layer=' + layer);
     await p.locator('.watch').screenshot({ path: path.join(__dirname, 'png', layer + '.png'), omitBackground: layer !== 'bg' });
   }
+  await p.goto(url + '?layer=gallery');
+  await p.locator('.watch').screenshot({ path: path.join(__dirname, 'png', 'gt4-galeria.png') });
   const pv = await b.newPage({ viewport: { width: 560, height: 600 }, deviceScaleFactor: 2 });
   await pv.goto(url); await pv.waitForTimeout(300);
   await pv.locator('.watch').screenshot({ path: path.join(__dirname, 'png', 'preview.png') });

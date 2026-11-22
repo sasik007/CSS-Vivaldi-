@@ -18,3 +18,11 @@ Rozdzielczość **466 × 466 px** – Huawei Watch GT 2 / GT 3 / GT 4 (46 mm), W
 3. Dodaj wskazówki godzinową, minutową i sekundową z plików PNG. **Środek obrotu: x = 233, y = 233** (obrazy mają pełny rozmiar 466×466).
 4. W ramkach dodaj widżety: data (górna, zielona ramka) i godzina cyfrowa / kroki / bateria (dolna, niebieska ramka).
 5. Zbuduj plik `.hwt` i zainstaluj na zegarku przez Theme Studio (tryb dewelopera) lub opublikuj w sklepie Huawei.
+
+## Najszybciej: gotowa tarcza na Huawei Watch GT 4 (bez Theme Studio)
+Plik `png/gt4-galeria.png` to tło tarczy z wolnym środkiem na godzinę.
+1. Skopiuj `gt4-galeria.png` na telefon.
+2. Huawei Health → Twój zegarek → **Tarcze zegarka** → **Więcej** → **Galeria** (tarcza „Galeria”/„Zdjęcie”).
+3. Dodaj zdjęcie (**+**) → wybierz `gt4-galeria.png`.
+4. **Styl** – wybierz czcionkę i kolor godziny (np. biały lub żółty), **Pozycja** – środek.
+5. **Zapisz** – tarcza pojawi się na zegarku.

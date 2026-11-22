@@ -38,7 +38,7 @@
     <g id="ticks"></g>
     <g id="numerals" font-family="'Segoe UI',Roboto,Arial,sans-serif" font-weight="700" text-anchor="middle" dominant-baseline="central"></g>
     <!-- tarcze pomocnicze -->
-    <g opacity=".9">
+    <g id="boxes" opacity=".9">
       <rect x="183" y="128" width="100" height="34" rx="8" fill="rgba(27,35,41,.7)" stroke="#00ff00" stroke-width="1.5"/>
       <rect x="183" y="304" width="100" height="34" rx="8" fill="rgba(27,35,41,.7)" stroke="#0078ff" stroke-width="1.5"/>
       <text x="233" y="117" fill="#0a5c0a" font-size="11" text-anchor="middle" font-family="Arial" letter-spacing="3">GX</text>
@@ -100,7 +100,14 @@
 
   // Tryb eksportu: ?layer=bg|hour|minute|second – pokazuje tylko jedną warstwę na przezroczystym tle
   const layer = new URLSearchParams(location.search).get("layer");
-  if (layer) {
+  if (layer === "gallery") {
+    document.body.style.background = "#000";
+    // Wersja do tarczy "Galeria" w Huawei Health: samo tło, środek wolny na godzinę zegarka
+    document.body.className = "export";
+    document.querySelector(".hint").remove();
+    for (const id of ["boxes", "layer-data", "layer-hour", "layer-minute", "layer-second"])
+      document.getElementById(id).style.display = "none";
+  } else if (layer) {
     document.body.className = "export";
     document.querySelector(".hint").remove();
     for (const id of ["bg", "data", "hour", "minute", "second"])
