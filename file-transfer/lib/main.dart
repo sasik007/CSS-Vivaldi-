@@ -8,7 +8,6 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import 'net.dart';
 
@@ -75,9 +74,7 @@ Future<Directory> resolveSaveDir() async {
   if (Platform.isAndroid) {
     final public = Directory('/storage/emulated/0/Download/$folder');
     if (await _writable(public)) return public;
-    // Starsze Androidy (9 i niżej) wymagają zgody na zapis.
-    await Permission.storage.request();
-    if (await _writable(public)) return public;
+    // Android 9 i starsze bez zgody na zapis: folder aplikacji.
     final ext = await getExternalStorageDirectory();
     return Directory('${(ext ?? await getApplicationDocumentsDirectory()).path}/$folder');
   }
