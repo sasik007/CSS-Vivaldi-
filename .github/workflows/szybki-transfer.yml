@@ -1,0 +1,93 @@
+name: Szybki Transfer – build
+
+on:
+  push:
+    paths:
+      - 'file-transfer/**'
+      - '.github/workflows/szybki-transfer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: file-transfer
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: cp build/app/outputs/flutter-apk/app-release.apk SzybkiTransfer.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SzybkiTransfer-android
+          path: file-transfer/SzybkiTransfer.apk
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Spakuj
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath SzybkiTransfer-Windows.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SzybkiTransfer-windows
+          path: file-transfer/SzybkiTransfer-Windows.zip
+
+  release:
+    needs: [android, windows]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: szybki-transfer-latest
+          name: Szybki Transfer (najnowsza wersja)
+          prerelease: true
+          make_latest: false
+          target_commitish: ${{ github.sha }}
+          body: |
+            Do pobrania:
+            - **SzybkiTransfer.apk** – na telefon z Androidem
+            - **SzybkiTransfer-Windows.zip** – na komputer z Windows (rozpakuj i uruchom szybki_transfer.exe)
+          files: |
+            SzybkiTransfer.apk
+            SzybkiTransfer-Windows.zip
